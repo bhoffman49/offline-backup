@@ -1,0 +1,145 @@
+object FormPreview: TFormPreview
+  Left = 420
+  Height = 600
+  Top = 100
+  Width = 860
+  Caption = 'Offline Backup - Preview'
+  ClientHeight = 600
+  ClientWidth = 860
+  Constraints.MinHeight = 480
+  Constraints.MinWidth = 600
+  Position = poOwnerFormCenter
+  LCLVersion = '4.4.0.0'
+  object LabelDrive: TLabel
+    Left = 12
+    Height = 15
+    Top = 12
+    Width = 836
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object LabelBanner: TLabel
+    Left = 12
+    Height = 15
+    Top = 34
+    Width = 836
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+  end
+  object LabelWarning: TLabel
+    Left = 12
+    Height = 34
+    Top = 54
+    Width = 836
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+    Font.Color = clRed
+    Font.Style = [fsBold]
+    ParentFont = False
+    WordWrap = True
+  end
+  object ListSummary: TListView
+    Left = 12
+    Height = 196
+    Top = 92
+    Width = 836
+    Anchors = [akTop, akLeft, akRight]
+    Columns = <
+      item
+        Caption = 'On the drive'
+        Width = 300
+      end
+      item
+        Alignment = taRightJustify
+        Caption = 'Files / folders'
+        Width = 110
+      end
+      item
+        Alignment = taRightJustify
+        Caption = 'Size'
+        Width = 110
+      end>
+    HideSelection = False
+    ReadOnly = True
+    RowSelect = True
+    TabOrder = 0
+    ViewStyle = vsReport
+    OnSelectItem = ListSummarySelectItem
+  end
+  object LabelFiles: TLabel
+    Left = 12
+    Height = 15
+    Top = 296
+    Width = 400
+    Caption = ''
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object ListFiles: TListView
+    Left = 12
+    Height = 214
+    Top = 316
+    Width = 836
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    Columns = <
+      item
+        Caption = 'Change'
+        Width = 95
+      end
+      item
+        Caption = 'Folder'
+        Width = 100
+      end
+      item
+        Caption = 'File'
+        Width = 535
+      end
+      item
+        Alignment = taRightJustify
+        Caption = 'Size'
+        Width = 80
+      end>
+    OwnerData = True
+    ReadOnly = True
+    RowSelect = True
+    TabOrder = 1
+    ViewStyle = vsReport
+    OnData = ListFilesData
+  end
+  object CheckAlways: TCheckBox
+    Left = 12
+    Height = 19
+    Top = 538
+    Width = 836
+    Anchors = [akLeft, akBottom]
+    Caption = 'Show this preview before every copy (otherwise only when files would be deleted or moved on the drive)'
+    TabOrder = 2
+  end
+  object ButtonCopy: TButton
+    Left = 672
+    Height = 28
+    Top = 564
+    Width = 84
+    Anchors = [akRight, akBottom]
+    Caption = 'Copy'
+    Default = True
+    ModalResult = 1
+    TabOrder = 3
+  end
+  object ButtonCancel: TButton
+    Left = 764
+    Height = 28
+    Top = 564
+    Width = 84
+    Anchors = [akRight, akBottom]
+    Cancel = True
+    Caption = 'Cancel'
+    ModalResult = 2
+    TabOrder = 4
+  end
+end

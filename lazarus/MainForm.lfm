@@ -1,0 +1,177 @@
+object FormMain: TFormMain
+  Left = 400
+  Height = 460
+  Top = 200
+  Width = 620
+  Caption = 'Offline Backup'
+  ClientHeight = 460
+  ClientWidth = 620
+  Constraints.MinHeight = 300
+  Constraints.MinWidth = 420
+  Position = poScreenCenter
+  OnCloseQuery = FormCloseQuery
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  LCLVersion = '4.4.0.0'
+  object LabelDrives: TLabel
+    Left = 12
+    Height = 15
+    Top = 12
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = 'Looking for OFFLINE-x drives ...'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object ButtonStart: TButton
+    Left = 12
+    Height = 28
+    Top = 36
+    Width = 110
+    Caption = 'Start copy'
+    Enabled = False
+    OnClick = ButtonStartClick
+    TabOrder = 0
+  end
+  object ButtonCancel: TButton
+    Left = 130
+    Height = 28
+    Top = 36
+    Width = 110
+    Caption = 'Cancel'
+    Enabled = False
+    OnClick = ButtonCancelClick
+    TabOrder = 1
+  end
+  object ButtonSettings: TButton
+    Left = 248
+    Height = 28
+    Top = 36
+    Width = 110
+    Caption = 'Settings...'
+    OnClick = ButtonSettingsClick
+    TabOrder = 2
+  end
+  object ButtonCheck: TButton
+    Left = 484
+    Height = 28
+    Top = 36
+    Width = 110
+    Caption = 'Check MD5...'
+    OnClick = ButtonCheckClick
+    TabOrder = 6
+  end
+  object ButtonDrives: TButton
+    Left = 366
+    Height = 28
+    Top = 36
+    Width = 110
+    Caption = 'Drives...'
+    Enabled = False
+    OnClick = ButtonDrivesClick
+    TabOrder = 5
+  end
+  object LabelStatus: TLabel
+    Left = 12
+    Height = 15
+    Top = 76
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+  end
+  object LabelEta: TLabel
+    Left = 12
+    Height = 15
+    Top = 98
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+  end
+  object LabelCounts: TLabel
+    Left = 12
+    Height = 15
+    Top = 116
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+  end
+  object LabelRate: TLabel
+    Left = 12
+    Height = 15
+    Top = 134
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    AutoSize = False
+    Caption = ''
+  end
+  object ProgressBar: TProgressBar
+    Left = 12
+    Height = 20
+    Top = 158
+    Width = 596
+    Anchors = [akTop, akLeft, akRight]
+    TabOrder = 3
+  end
+  object MemoLog: TMemo
+    Left = 12
+    Height = 264
+    Top = 188
+    Width = 596
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    ReadOnly = True
+    ScrollBars = ssAutoVertical
+    TabOrder = 4
+  end
+  object TrayIcon: TTrayIcon
+    PopUpMenu = TrayMenu
+    OnClick = TrayIconClick
+    Left = 480
+    Top = 40
+  end
+  object Md5Dialog: TOpenDialog
+    DefaultExt = 'md5'
+    Filter = 'MD5 files (*.md5)|*.md5|All files (*.*)|*.*'
+    Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing]
+    Title = 'Check the files listed in an MD5 file'
+    Left = 360
+    Top = 40
+  end
+  object TrayMenu: TPopupMenu
+    Left = 420
+    Top = 40
+    object MenuShow: TMenuItem
+      Caption = 'Show'
+      Default = True
+      OnClick = MenuShowClick
+    end
+    object MenuStart: TMenuItem
+      Caption = 'Start copy'
+      Enabled = False
+      OnClick = ButtonStartClick
+    end
+    object MenuSettings: TMenuItem
+      Caption = 'Settings...'
+      OnClick = ButtonSettingsClick
+    end
+    object MenuCheck: TMenuItem
+      Caption = 'Check MD5 file...'
+      OnClick = ButtonCheckClick
+    end
+    object MenuDrives: TMenuItem
+      Caption = 'Drives...'
+      Enabled = False
+      OnClick = ButtonDrivesClick
+    end
+    object MenuSep: TMenuItem
+      Caption = '-'
+    end
+    object MenuExit: TMenuItem
+      Caption = 'Exit'
+      OnClick = MenuExitClick
+    end
+  end
+end

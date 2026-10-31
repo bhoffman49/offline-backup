@@ -1,0 +1,17 @@
+build/
+# Lazarus
+lazarus/*.res
+lazarus/*.lps
+lazarus/backup/
+lib/
+# Delphi
+delphi/*.res
+delphi/*.dproj.local
+delphi/*.identcache
+delphi/__history/
+delphi/__recovery/
+delphi/Win64/
+delphi/Win32/
+*.dcu
+*.local
+*.stat
