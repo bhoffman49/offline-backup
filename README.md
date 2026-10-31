@@ -1,22 +1,39 @@
 # Offline Backup
 
-A Windows tray app that copies the folders you choose onto rotating offline USB drives labelled `OFFLINE-A`,
-`OFFLINE-B`, ... Each drive knows which folders it backs up. It grew out of a PowerShell script
-(`Copy-OfflineBackup.ps1`) and keeps that script's behaviour: robocopy mirror, old versions moved to
-`<drive>\_versions\<yyyy-mm-dd_hhmm>\` first, a safety brake on unusually large changes, pruning of old
-versions, `LAST-COPY.txt` on the drive, and a log file (`offline-copy.log` next to the settings file unless
-you choose another place).
+A Windows tray app that copies the folders you choose onto USB drives you keep unplugged ("offline") -
+labelled `OFFLINE-A`, `OFFLINE-B`, ... - so ransomware, a failed disk or a bad mistake on the PC can't reach
+them. Each drive knows which folders it backs up. Before anything changes on a drive you see a preview; files
+that would be overwritten or deleted are kept in `_versions` first; moved files are moved on the drive instead
+of copied again; and CRC32 / MD5 checksums let you verify a drive at any time, even on another PC.
 
-Each source folder lands under its own drive letter: `G:\Backups` -> `<drive>\G-mirror\Backups` (where the
-script put it), `D:\MUSIC` -> `<drive>\D-mirror\MUSIC`. Old versions keep the same path under
-`_versions\<date>\` (sets made before 2026-10-28 23:00 have just `Backups\...`).
+Version **0.9.0** - first public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
+
+## Download and install
+
+1. Download `OfflineBackup-0.9.0-win64.zip` from the Releases page and unzip it to a folder you can write to
+   (for example `Documents\OfflineBackup`).
+2. Start `OfflineBackup.exe` - it sits in the tray (add `/show` to open its window too).
+   Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.
+3. Name a USB drive `OFFLINE-A` in File Explorer, plug it in, and set it up under **Drives...** (what it is
+   for, which folders it backs up). Then **Start copy**.
+
+Needs Windows 10 or 11, 64-bit (robocopy is part of Windows). The zip has a short how-to (`README.txt`).
+
+## How it works
+
+Each folder lands on the drive under its own drive letter: `D:\MUSIC` -> `<drive>\D-mirror\MUSIC`,
+`C:\Users\you\Documents` -> `<drive>\C-mirror\Documents`. Old versions keep the same path under
+`_versions\<yyyy-mm-dd_hhmm>\`. Every run: a dry run (robocopy `/L`), moved-file detection, the preview and the
+safety check, then old versions are saved, robocopy mirrors each folder, checksums are recorded, old version
+sets are pruned, and `LAST-COPY.txt` and the drive's history are written. The log goes to `offline-copy.log`
+next to the settings unless you choose another file.
 
 It comes in two editions built from one shared engine:
 
 | Edition | Folder | Toolchain | Notes |
 |---|---|---|---|
-| Delphi VCL | `delphi\` | Delphi 12 (dcc64) | native Win64 exe for daily use |
-| Lazarus LCL | `lazarus\` | Lazarus 4.4 / FPC 3.2.2 | free to build; the one to publish |
+| Lazarus LCL | `lazarus\` | Lazarus 4.4 / FPC 3.2.2 | free to build; the published download |
+| Delphi VCL | `delphi\` | Delphi 12 (dcc64) | same app, built with Delphi |
 
 Only one of the two can run at a time (they share a single-instance mutex).
 
@@ -24,32 +41,35 @@ Only one of the two can run at a time (they share a single-instance mutex).
 
 ```
 common\
-  OfflineEngine.pas    the backup itself: drive detection, settings file, dry run, brake, _versions,
-                       robocopy with progress, prune, LAST-COPY.txt, flush. No UI code. Compiles under
-                       both compilers ({$mode delphiunicode} under FPC).
+  OfflineEngine.pas    the backup itself: drive detection, settings, drive maps, dry run, moves, preview data,
+                       brake, _versions, robocopy with progress, checksums (CRC32/MD5), verify, MD5 check,
+                       prune, LAST-COPY.txt, flush. No UI code. Compiles under both compilers
+                       ({$mode delphiunicode} under FPC).
   DriveWatcher.pas     WM_DEVICECHANGE via its own hidden window (works the same in VCL and LCL)
   OfflineBackup.ico    app + tray icon (made by tools\make-icon.py)
-delphi\                VCL edition: OfflineBackup.dpr, MainForm, SettingsForm, SourceForm, DriveForm (.pas/.dfm),
-                       .rc + manifest, build.cmd
-lazarus\               LCL edition: OfflineBackup.lpi/.lpr, the same four forms (.pas/.lfm), build.cmd
+delphi\                VCL edition: OfflineBackup.dpr, .rc + manifest, build.cmd, and the forms (.pas/.dfm):
+                       MainForm, SettingsForm, SourceForm, DriveForm, PreviewForm, CheckForm
+lazarus\               LCL edition: OfflineBackup.lpi/.lpr, build.cmd, the same forms (.pas/.lfm)
 tests\                 EngineTest.dpr - runs the engine against throw-away folders; run-tests.cmd
                        builds and runs it with both compilers
-tools\                 make-icon.py, screenshot.ps1
-build\                 compiler output (not in git)
+tools\                 make-icon.py, screenshot.ps1, release-readme.txt (the README.txt in the zip)
+make-release.cmd       tests + both builds + the download zip in dist\
+build\, dist\          compiler output and release zips (not in git)
 ```
 
 ### Engine / UI split
 
-`TOfflineCopy` (in `OfflineEngine`) does one full run against one drive and reports through three
-events: `OnLog`, `OnProgress` and `OnConfirm` (the brake question). `TOfflineCopyThread` runs it in the
-background and raises those events on the main thread, so the forms only show things and ask
-questions. Everything that decides what happens to the drive is in the shared unit, tested once,
-for both editions.
+`TOfflineCopy` (in `OfflineEngine`) does one run against one drive - a copy, a Verify, or an MD5 check - and
+reports through events: `OnLog`, `OnProgress`, `OnPreview` (Copy or Cancel), `OnConfirm` (the safety check
+when there is no preview) and `OnMissing` (a source folder is gone). `TOfflineCopyThread` runs it in the
+background and raises those events on the main thread, so the forms only show things and ask questions.
+Everything that decides what happens to a drive is in the shared unit, tested once, for both editions.
 
-Safety rules kept from the script and enforced in the engine, not the UI:
+Safety rules, enforced in the engine, not the UI:
 - only drives labelled `OFFLINE-<A-Z>`, never the drive Windows is on; the label is checked again right
   before copying
-- nothing on the drive is touched until the dry run and brake have passed
+- only drives that have been set up and have a folder list
+- nothing on the drive is touched until the dry run, the preview and the brake have passed
 - anything robocopy would overwrite or delete is moved to `_versions` first (only from inside that
   folder's mirror)
 - old-version cleanup removes junctions without following them
@@ -57,10 +77,14 @@ Safety rules kept from the script and enforced in the engine, not the UI:
 ## Build
 
 ```
-delphi\build.cmd        -> build\delphi\OfflineBackup.exe
-lazarus\build.cmd       -> build\lazarus\OfflineBackup.exe   (set LAZBUILD if Lazarus is not in F:\lazarus)
-tests\run-tests.cmd     -> builds and runs the engine tests with both compilers
+lazarus\build.cmd       -> build\lazarus\OfflineBackup.exe   (set LAZBUILD if lazbuild.exe is not in F:\lazarus)
+delphi\build.cmd        -> build\delphi\OfflineBackup.exe    (Delphi 12 in its default folder)
+tests\run-tests.cmd     -> builds and runs the engine tests with both compilers (skips one that is not installed)
+make-release.cmd        -> all of the above, then dist\OfflineBackup-<version>-win64.zip
 ```
+
+The version is `AppVersion` in `common\OfflineEngine.pas`; keep `delphi\OfflineBackup.rc` and the version
+info in `lazarus\OfflineBackup.lpi` in step with it.
 
 Both projects also open in their IDEs. In the Delphi IDE, open `delphi\OfflineBackup.dpr`; the IDE
 creates a `.dproj` and may regenerate `OfflineBackup.res` with its own icon. Set the icon to
@@ -69,10 +93,11 @@ creates a `.dproj` and may regenerate `OfflineBackup.res` with its own icon. Set
 ## Use
 
 Start `OfflineBackup.exe` (add `/show` to open the window as well). It sits in the tray. When an
-`OFFLINE-x` drive is plugged in, it shows a balloon and opens its window. Press **Start copy** to copy
-the ticked folders to every OFFLINE drive that is plugged in, one after another. While it copies, the window shows time left,
-files done / failed / skipped / total and the transfer rate (also in the tray icon's tooltip). Closing the window only hides it;
-**Exit** is on the tray icon's menu.
+`OFFLINE-x` drive is plugged in while the window is closed, it shows a balloon and opens its window.
+**Start copy** copies to every set-up OFFLINE drive that is plugged in, one after another, each with its own
+folders. While it copies, the window shows time left, files done / failed / skipped / total and the transfer
+rate (also in the tray icon's tooltip); when the run ends, a small window says how each drive went. Closing the
+window only hides it; **Exit** is on the tray icon's menu.
 
 ## Drives
 
@@ -173,5 +198,11 @@ say INCOMPLETE) or stop that drive's copy.
 
 ## Not done yet
 
-- browse `G-mirror` / `_versions` and restore files
-- start with Windows
+- browse a drive's backups and `_versions`, and restore files (for now: File Explorer - the files on the
+  drive are plain copies)
+- start with Windows (for now: a shortcut in the Startup folder, `shell:startup`)
+- code signing (Windows warns about unsigned programs)
+
+## License
+
+MIT - see `LICENSE`. No warranty: keep more than one backup.

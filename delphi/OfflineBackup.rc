@@ -1,2 +1,27 @@
 MAINICON ICON "..\\common\\OfflineBackup.ico"
 1 24 "OfflineBackup.manifest"
+
+// keep in step with AppVersion in ..\common\OfflineEngine.pas
+1 VERSIONINFO
+FILEVERSION 0,9,0,0
+PRODUCTVERSION 0,9,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904E4"
+    BEGIN
+      VALUE "FileDescription", "Offline Backup - copies chosen folders to OFFLINE-x USB drives\0"
+      VALUE "FileVersion", "0.9.0\0"
+      VALUE "ProductName", "Offline Backup\0"
+      VALUE "ProductVersion", "0.9.0\0"
+      VALUE "LegalCopyright", "Copyright (c) 2026 bhoffman - MIT License\0"
+      VALUE "OriginalFilename", "OfflineBackup.exe\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1252
+  END
+END

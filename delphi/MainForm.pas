@@ -91,6 +91,7 @@ begin
   TrayIcon.Icon.Assign(Application.Icon);
   TrayIcon.Hint := 'Offline Backup';
   TrayIcon.Visible := True;
+  Caption := 'Offline Backup ' + AppVersion;
   FWatcher := TDriveWatcher.Create;
   FWatcher.OnChange := DrivesChanged;
   FStarting := True;

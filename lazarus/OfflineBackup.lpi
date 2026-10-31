@@ -17,6 +17,11 @@
       </XPManifest>
       <Icon Value="0"/>
     </General>
+    <VersionInfo>
+      <UseVersionInfo Value="True"/>
+      <MinorVersionNr Value="9"/>
+      <StringTable FileDescription="Offline Backup - copies chosen folders to OFFLINE-x USB drives" LegalCopyright="Copyright (c) 2026 bhoffman - MIT License" ProductName="Offline Backup" ProductVersion="0.9.0"/>
+    </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="default" Default="True"/>
     </BuildModes>
