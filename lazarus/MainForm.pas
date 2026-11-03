@@ -191,11 +191,12 @@ begin
   begin
     if Names <> '' then Names := Names + ', ';
     Names := Names + FDrives[I].VolLabel + ' on ' + Copy(FDrives[I].Root, 1, 2);
+    // right after the letter, so a long line cut off at the window's edge still shows it
+    if FDrives[I].VeraCrypt then Names := Names + ' [VeraCrypt]';
     if not FDrives[I].SetUp and (FDrives[I].Description <> '') then
       Names := Names + ' (' + FDrives[I].Description + ' - no folders chosen yet)'
     else if not FDrives[I].SetUp then Names := Names + ' (new - not set up)'
     else if FDrives[I].Description <> '' then Names := Names + ' (' + FDrives[I].Description + ')';
-    if FDrives[I].VeraCrypt then Names := Names + ' [VeraCrypt]';
     Known := False;
     for J := 0 to High(Old) do
       if (Old[J].Root = FDrives[I].Root) and (Old[J].VolLabel = FDrives[I].VolLabel) then Known := True;
@@ -428,7 +429,7 @@ procedure TFormMain.ButtonDismountClick(Sender: TObject);
 var
   I: Integer;
   Problem: UnicodeString;             // the engine's strings are UnicodeString
-  Problems, Done: string;
+  Problems, Done, Line: string;
 begin
   if Assigned(FThread) then Exit;
   ShowWindow;
@@ -440,13 +441,17 @@ begin
       if FDrives[I].VeraCrypt then
         if DismountVeraCrypt(FSettings.VeraCryptExe, FDrives[I].Letter, Problem) then
         begin
-          AddLog(FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + '): dismounted in VeraCrypt - safe to unplug');
+          Line := FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + '): dismounted in VeraCrypt - safe to unplug';
+          AddLog(Line);
+          AppendLogLine(FSettings.LogFile, Line);   // in the log file too, like a dismount after a copy
           if Done <> '' then Done := Done + ', ';
           Done := Done + FDrives[I].VolLabel;
         end
         else
         begin
-          AddLog(FDrives[I].VolLabel + ': not dismounted: ' + Problem);
+          Line := FDrives[I].VolLabel + ': not dismounted: ' + Problem;
+          AddLog(Line);
+          AppendLogLine(FSettings.LogFile, Line);
           if Problems <> '' then Problems := Problems + sLineBreak + sLineBreak;
           Problems := Problems + FDrives[I].VolLabel + ': ' + Problem + '.';
         end;
