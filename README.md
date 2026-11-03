@@ -6,11 +6,11 @@ them. Each drive knows which folders it backs up. Before anything changes on a d
 that would be overwritten or deleted are kept in `_versions` first; moved files are moved on the drive instead
 of copied again; and CRC32 / MD5 checksums let you verify a drive at any time, even on another PC.
 
-Version **0.9.0** - first public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
+Version **0.9.1** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
 
 ## Download and install
 
-1. Download `OfflineBackup-0.9.0-win64.zip` from the Releases page and unzip it to a folder you can write to
+1. Download `OfflineBackup-0.9.1-win64.zip` from the Releases page and unzip it to a folder you can write to
    (for example `Documents\OfflineBackup`).
 2. Start `OfflineBackup.exe` - it sits in the tray (add `/show` to open its window too).
    Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.

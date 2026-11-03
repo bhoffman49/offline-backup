@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 - 2026-11-02
+
+- Fixed: on exFAT and FAT32 drives (how most USB sticks come), about a third of the copied files got no
+  checksum - so they were left out of Verify and of the `.md5` files - and moved files were copied again instead
+  of moved. These drives keep file times in 2-second steps; checksums and move detection now allow for that,
+  as robocopy does. Files copied by 0.9.0 without a checksum get one at the next **Verify drive**.
+- Tested with a VeraCrypt volume labelled `OFFLINE-X`: encrypted drives work like any other OFFLINE drive.
+
 ## 0.9.0 - 2026-10-30 - first public beta
 
 - Copies the folders you choose to USB drives labelled `OFFLINE-A`, `OFFLINE-B`, ... with robocopy: a mirror

@@ -262,7 +262,7 @@ type
 
 function PreviewKindText(K: TPreviewKind): string;   // 'Files to add', ...
 const
-  AppVersion = '0.9.0';         // shown in the window title; make-release.cmd reads it from this line
+  AppVersion = '0.9.1';         // shown in the window title; make-release.cmd reads it from this line
 
 function DefaultSettings: TBackupSettings;
 // settings file: OfflineBackup.ini next to the exe (each edition has its own), or in %APPDATA%\OfflineBackup\
