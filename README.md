@@ -231,6 +231,9 @@ say INCOMPLETE) or stop that drive's copy.
 
 ## Encrypted backup drives with VeraCrypt
 
+*Coming in 0.9.2 - the `[VeraCrypt]` mark, the Dismount button and the dismount setting are not in the 0.9.1
+download yet. VeraCrypt drives already work with 0.9.1; dismount them in VeraCrypt before unplugging.*
+
 A backup drive left in a drawer or a car can be lost or stolen. [VeraCrypt](https://veracrypt.fr) (free, open
 source) encrypts it, and Offline Backup works with it: VeraCrypt stays a separate program that opens the drive
 and asks for the password - this app never sees the password and never stores it.
