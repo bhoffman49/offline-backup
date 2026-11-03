@@ -803,9 +803,10 @@ end;
 procedure TestSettingsFile;
 var
   S, T: TBackupSettings;
-  F, Fotos: string;
+  F, Fotos, Problem: string;
   Same: Boolean;
   I: Integer;
+  Sys: Char;
 begin
   WriteLn('--- settings file');
   Check(SameText(SettingsFileName, ExtractFilePath(ParamStr(0)) + 'OfflineBackup.ini') and not SettingsInAppData,
@@ -848,6 +849,24 @@ begin
   Check((Length(T.Exclude) = 2) and (T.Exclude[0] = 'build') and (T.Exclude[1] = 'D:\MUSIC\tmp'), 'exclusions read back');
   Check((T.BrakePercent = 33) and (T.BrakeMinFiles = 7) and (T.KeepVersionDays = 30) and (T.MaxDriveFullPct = 90) and
     (T.LogFile = S.LogFile) and not T.PreviewAlways, 'numbers, log file and preview setting read back');
+  Check(not S.DismountAfterCopy and (S.VeraCryptExe = ''), 'VeraCrypt: no dismount after copy by default');
+  S.DismountAfterCopy := True;
+  S.VeraCryptExe := 'E:\Portable VeraCrypt\VeraCrypt-x64.exe';
+  SaveSettings(F, S);
+  T := LoadSettings(F);
+  Check(T.DismountAfterCopy and (T.VeraCryptExe = S.VeraCryptExe), '... dismount after copy and VeraCrypt.exe read back');
+  S.DismountAfterCopy := False;
+  S.VeraCryptExe := '';
+
+  Sys := UpCase((GetEnvironmentVariable('SystemDrive') + 'C')[1]);
+  // VeraCrypt: the Windows drive is never a VeraCrypt volume, a made-up VeraCrypt.exe is not used,
+  // and dismounting a letter that is no VeraCrypt volume has nothing to do
+  Check(not IsVeraCryptVolume(Sys), 'the Windows drive is not a VeraCrypt volume');
+  Check(FindVeraCrypt(Work + 'no-such\VeraCrypt.exe') <> Work + 'no-such\VeraCrypt.exe',
+    'a VeraCrypt.exe that is not there is not used');
+  WriteLn('  (VeraCrypt.exe found: ', FindVeraCrypt(''), ')');
+  Check(DismountVeraCrypt('', Sys, Problem) and (Problem = ''),
+    'dismounting a drive that is no VeraCrypt volume does nothing');
 
   S.Sources := nil;
   S.Exclude := nil;

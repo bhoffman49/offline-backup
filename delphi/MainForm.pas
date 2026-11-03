@@ -17,6 +17,7 @@ type
     ButtonSettings: TButton;
     ButtonDrives: TButton;
     ButtonCheck: TButton;
+    ButtonDismount: TButton;
     Md5Dialog: TOpenDialog;
     LabelStatus: TLabel;
     LabelEta: TLabel;
@@ -31,6 +32,7 @@ type
     MenuSettings: TMenuItem;
     MenuDrives: TMenuItem;
     MenuCheck: TMenuItem;
+    MenuDismount: TMenuItem;
     MenuSep: TMenuItem;
     MenuExit: TMenuItem;
     procedure FormCreate(Sender: TObject);
@@ -41,6 +43,7 @@ type
     procedure ButtonSettingsClick(Sender: TObject);
     procedure ButtonDrivesClick(Sender: TObject);
     procedure ButtonCheckClick(Sender: TObject);
+    procedure ButtonDismountClick(Sender: TObject);
     procedure TrayIconClick(Sender: TObject);
     procedure TrayIconMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
     procedure MenuShowClick(Sender: TObject);
@@ -71,6 +74,7 @@ type
     procedure CopyProgress(const P: TCopyProgress);
     procedure ClearProgress;
     procedure AddRunLine(T: TOfflineCopyThread);
+    function UnplugAdvice(T: TOfflineCopyThread): string;
     procedure ShowRunSummary;
     procedure CopyConfirm(const Folders: string; var GoAhead: Boolean);
     procedure CopyMissing(const Path: string; var Skip: Boolean);
@@ -197,6 +201,7 @@ begin
       Names := Names + ' (' + FDrives[I].Description + ' - no folders chosen yet)'
     else if not FDrives[I].SetUp then Names := Names + ' (new - not set up)'
     else if FDrives[I].Description <> '' then Names := Names + ' (' + FDrives[I].Description + ')';
+    if FDrives[I].VeraCrypt then Names := Names + ' [VeraCrypt]';
     Known := False;
     for J := 0 to High(Old) do
       if (Old[J].Root = FDrives[I].Root) and (Old[J].VolLabel = FDrives[I].VolLabel) then Known := True;
@@ -264,8 +269,9 @@ end;
 
 procedure TFormMain.UpdateButtons;
 var
-  I: Integer;
+  I, Vera: Integer;
   Ready: Boolean;
+  VeraName: string;
 begin
   Ready := False;                     // only drives that have been set up are copied to
   for I := 0 to High(FDrives) do
@@ -280,6 +286,21 @@ begin
   MenuDrives.Enabled := ButtonDrives.Enabled;
   ButtonCheck.Enabled := FThread = nil;
   MenuCheck.Enabled := ButtonCheck.Enabled;
+  // Dismount only shows when a VeraCrypt OFFLINE volume is mounted - everyone else never sees it
+  Vera := 0;
+  VeraName := '';
+  for I := 0 to High(FDrives) do
+    if FDrives[I].VeraCrypt then
+    begin
+      Inc(Vera);
+      VeraName := Copy(FDrives[I].Root, 1, 2);
+    end;
+  ButtonDismount.Visible := Vera > 0;
+  if Vera = 1 then ButtonDismount.Caption := 'Dismount ' + VeraName else ButtonDismount.Caption := 'Dismount all';
+  ButtonDismount.Enabled := FThread = nil;
+  MenuDismount.Visible := ButtonDismount.Visible;
+  MenuDismount.Caption := ButtonDismount.Caption + ' (VeraCrypt)';
+  MenuDismount.Enabled := ButtonDismount.Enabled;
 end;
 
 procedure TFormMain.ButtonStartClick(Sender: TObject);
@@ -408,6 +429,40 @@ begin
   FThread.Start;
 end;
 
+{ VeraCrypt does the dismount (VeraCrypt.exe /dismount X /quit /silent); never forced, so open files are reported }
+procedure TFormMain.ButtonDismountClick(Sender: TObject);
+var
+  I: Integer;
+  Problem, Problems, Done: string;
+begin
+  if Assigned(FThread) then Exit;
+  ShowWindow;
+  Problems := '';
+  Done := '';
+  Screen.Cursor := crHourGlass;
+  try
+    for I := 0 to High(FDrives) do
+      if FDrives[I].VeraCrypt then
+        if DismountVeraCrypt(FSettings.VeraCryptExe, FDrives[I].Letter, Problem) then
+        begin
+          AddLog(FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + '): dismounted in VeraCrypt - safe to unplug');
+          if Done <> '' then Done := Done + ', ';
+          Done := Done + FDrives[I].VolLabel;
+        end
+        else
+        begin
+          AddLog(FDrives[I].VolLabel + ': not dismounted: ' + Problem);
+          if Problems <> '' then Problems := Problems + sLineBreak + sLineBreak;
+          Problems := Problems + FDrives[I].VolLabel + ': ' + Problem + '.';
+        end;
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  RefreshDrives(False);
+  if Done <> '' then LabelStatus.Caption := Done + ': dismounted - safe to unplug';
+  if Problems <> '' then MessageDlg(Problems, mtWarning, [mbOK], 0);
+end;
+
 procedure TFormMain.ButtonCheckClick(Sender: TObject);
 begin
   if Assigned(FThread) then Exit;
@@ -485,12 +540,22 @@ begin
     mtWarning, [mbYes, mbNo], 0) = mrYes;
 end;
 
+{ What to do before unplugging the drive T has just copied to: a VeraCrypt volume has to be dismounted first }
+function TFormMain.UnplugAdvice(T: TOfflineCopyThread): string;
+begin
+  if T.Engine.Dismounted then Result := 'dismounted - safe to unplug'
+  else if T.Engine.VeraCrypt then Result := 'dismount it in VeraCrypt (or with Dismount), then unplug'
+  else Result := 'safe to unplug';
+end;
+
 { One line of the end-of-run popup for the drive T has just finished }
 procedure TFormMain.AddRunLine(T: TOfflineCopyThread);
 var
-  Line: string;
+  Line, Unplug: string;
   P: TCopyProgress;
 begin
+  Unplug := UnplugAdvice(T);
+  Unplug := ' ' + UpperCase(Copy(Unplug, 1, 1)) + Copy(Unplug, 2, MaxInt) + '.';
   P := FLastProgress;
   if T.CopyResult <> crStopped then FRunAllStopped := False;
   if not (T.CopyResult in [crOk]) and not T.Engine.NothingChosen then FRunProblem := True;
@@ -507,15 +572,15 @@ begin
     case T.CopyResult of
       crOk:
         if (P.FilesDone = 0) and (P.Moved > 0) then
-          Line := 'ok - ' + FormatFloat('#,##0', P.Moved) + ' file(s) moved on the drive, nothing needed copying. ' +
-            'Safe to unplug.'
-        else if P.FilesDone = 0 then Line := 'ok - already up to date, nothing needed copying. Safe to unplug.'
+          Line := 'ok - ' + FormatFloat('#,##0', P.Moved) + ' file(s) moved on the drive, nothing needed copying.' +
+            Unplug
+        else if P.FilesDone = 0 then Line := 'ok - already up to date, nothing needed copying.' + Unplug
         else if P.Moved > 0 then
           Line := 'ok - ' + FormatFloat('#,##0', P.FilesDone) + ' file(s), ' + FormatSize(P.FilesDoneBytes) +
-            ' copied, ' + FormatFloat('#,##0', P.Moved) + ' moved on the drive. Safe to unplug.'
+            ' copied, ' + FormatFloat('#,##0', P.Moved) + ' moved on the drive.' + Unplug
         else Line := 'ok - ' + FormatFloat('#,##0', P.FilesDone) + ' file(s), ' + FormatSize(P.FilesDoneBytes) +
-          ' copied. Safe to unplug.';
-      crIncomplete: Line := 'copied, but missing folder(s) were skipped - see the log. Safe to unplug.';
+          ' copied.' + Unplug;
+      crIncomplete: Line := 'copied, but missing folder(s) were skipped - see the log.' + Unplug;
       crStopped: Line := 'stopped - nothing was changed on the drive.';
       crSkipped: Line := T.Engine.SkipReason + '.';
       crCancelled: Line := 'cancelled - the copy on the drive is incomplete until the next run.';
@@ -559,9 +624,9 @@ begin
     else if T.CopyResult = crCancelled then LabelStatus.Caption := T.DriveLabel + ': verify cancelled'
     else LabelStatus.Caption := T.DriveLabel + ': verify found problems - see the log below';
   end
-  else if T.CopyResult = crOk then LabelStatus.Caption := T.DriveLabel + ': done - safe to unplug'
+  else if T.CopyResult = crOk then LabelStatus.Caption := T.DriveLabel + ': done - ' + UnplugAdvice(T)
   else if T.CopyResult = crIncomplete then
-    LabelStatus.Caption := T.DriveLabel + ': done except the missing folder(s) - safe to unplug'
+    LabelStatus.Caption := T.DriveLabel + ': done except the missing folder(s) - ' + UnplugAdvice(T)
   else LabelStatus.Caption := T.DriveLabel + ': ' + CopyResultText(T.CopyResult) + ' - see the log below';
   if not Visible then
   begin
@@ -570,6 +635,7 @@ begin
     TrayIcon.ShowBalloonHint;
   end;
   if not T.Checking then AddRunLine(T);
+  if T.Engine.Dismounted then RefreshDrives(False);  // in case VeraCrypt's own "drive gone" notice is late
   if T.Checking and not FQuitting then
   begin
     TrayIcon.Hint := 'Offline Backup';

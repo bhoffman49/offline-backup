@@ -34,6 +34,7 @@ type
     LabelMaxFull: TLabel;
     EditMaxFull: TEdit;
     CheckPreview: TCheckBox;
+    CheckDismount: TCheckBox;
     LabelLogFile: TLabel;
     EditLogFile: TEdit;
     ButtonLogFile: TButton;
@@ -89,6 +90,7 @@ begin
     F.EditMaxFull.Text := IntToStr(Settings.MaxDriveFullPct);
     F.EditLogFile.Text := Settings.LogFile;
     F.CheckPreview.Checked := Settings.PreviewAlways;
+    F.CheckDismount.Checked := Settings.DismountAfterCopy;
     F.UpdateButtons;
     Result := F.ShowModal = mrOk;
     if Result then Settings := F.FSettings;
@@ -256,6 +258,7 @@ begin
   end;
   FSettings.LogFile := Trim(EditLogFile.Text);
   FSettings.PreviewAlways := CheckPreview.Checked;
+  FSettings.DismountAfterCopy := CheckDismount.Checked;
   ReadTicks;
   FSettings.Exclude := nil;
   for I := 0 to ListExclude.Items.Count - 1 do

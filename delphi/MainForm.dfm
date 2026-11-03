@@ -2,10 +2,10 @@ object FormMain: TFormMain
   Left = 400
   Height = 460
   Top = 200
-  Width = 620
+  Width = 740
   Caption = 'Offline Backup'
   ClientHeight = 460
-  ClientWidth = 620
+  ClientWidth = 740
   Constraints.MinHeight = 300
   Constraints.MinWidth = 420
   Position = poScreenCenter
@@ -18,7 +18,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 15
     Top = 12
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     AutoSize = False
     Caption = 'Looking for OFFLINE-x drives ...'
@@ -73,11 +73,21 @@ object FormMain: TFormMain
     OnClick = ButtonDrivesClick
     TabOrder = 5
   end
+  object ButtonDismount: TButton
+    Left = 602
+    Height = 28
+    Top = 36
+    Width = 126
+    Caption = 'Dismount'
+    Visible = False
+    OnClick = ButtonDismountClick
+    TabOrder = 7
+  end
   object LabelStatus: TLabel
     Left = 12
     Height = 15
     Top = 76
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     AutoSize = False
     Caption = ''
@@ -86,7 +96,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 15
     Top = 98
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     AutoSize = False
     Caption = ''
@@ -95,7 +105,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 15
     Top = 116
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     AutoSize = False
     Caption = ''
@@ -104,7 +114,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 15
     Top = 134
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     AutoSize = False
     Caption = ''
@@ -113,7 +123,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 20
     Top = 158
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight]
     TabOrder = 3
   end
@@ -121,7 +131,7 @@ object FormMain: TFormMain
     Left = 12
     Height = 264
     Top = 188
-    Width = 596
+    Width = 716
     Anchors = [akTop, akLeft, akRight, akBottom]
     ReadOnly = True
     ScrollBars = ssVertical
@@ -166,6 +176,11 @@ object FormMain: TFormMain
       Caption = 'Drives...'
       Enabled = False
       OnClick = ButtonDrivesClick
+    end
+    object MenuDismount: TMenuItem
+      Caption = 'Dismount'
+      Visible = False
+      OnClick = ButtonDismountClick
     end
     object MenuSep: TMenuItem
       Caption = '-'

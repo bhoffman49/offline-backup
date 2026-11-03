@@ -54,6 +54,11 @@ GOOD TO KNOW
   Remove it to take its copy off the drive (into _versions).
 - Settings... holds what is the same for every drive: starting folders, folders
   never copied, the safety check, how long old versions are kept, the log file.
+- Encrypted drives: a drive encrypted with VeraCrypt (veracrypt.fr) works like any
+  other once VeraCrypt has mounted it and it is named OFFLINE-x. The app never asks
+  for the password. After the copy, click Dismount X: (or dismount it in VeraCrypt),
+  then unplug. If Windows offers to format the encrypted drive, never click Format.
+  More in README.md on the project page.
 
 
 UNINSTALL

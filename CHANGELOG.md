@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2 - not released yet
+
+- VeraCrypt: OFFLINE drives that are mounted VeraCrypt volumes are marked `[VeraCrypt]`, and a **Dismount**
+  button (also on the tray menu) asks VeraCrypt to dismount them - never forced, so open files are reported
+  instead. After a copy such a drive says "dismount it in VeraCrypt, then unplug" rather than "safe to unplug".
+- New setting: **Dismount VeraCrypt drives after a copy that went well** (off by default). `VeraCryptExe=` in the
+  INI for a portable VeraCrypt.
+- README: how to set up an encrypted backup drive with VeraCrypt.
+
 ## 0.9.1 - 2026-11-02
 
 - Fixed: on exFAT and FAT32 drives (how most USB sticks come), about a third of the copied files got no

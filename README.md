@@ -222,11 +222,47 @@ missing or unreadable.
   it was.
 - safety check %, minimum files, days to keep old versions, max drive full %, log file (default:
   `offline-copy.log` next to the settings file).
+- **Dismount VeraCrypt drives after a copy that went well** (off by default) - see below.
 
 Saved as `OfflineBackup.ini` (UTF-8) next to the exe, so the Delphi and Lazarus builds each have their own
 (in `%APPDATA%\OfflineBackup\` if the exe's folder can't be written to). No file = the defaults above. If a
 ticked folder is missing at copy time, the app asks: skip it (the rest is copied, result and `LAST-COPY.txt`
 say INCOMPLETE) or stop that drive's copy.
+
+## Encrypted backup drives with VeraCrypt
+
+A backup drive left in a drawer or a car can be lost or stolen. [VeraCrypt](https://veracrypt.fr) (free, open
+source) encrypts it, and Offline Backup works with it: VeraCrypt stays a separate program that opens the drive
+and asks for the password - this app never sees the password and never stores it.
+
+**Once, per drive:**
+
+1. Install VeraCrypt from veracrypt.fr.
+2. In VeraCrypt, **Create Volume**: either *Encrypt a non-system partition/drive* (the whole USB drive or a
+   partition of it - recommended) or a **fixed-size** file container on the drive. File system **NTFS**.
+   Not a *dynamic* (sparse) container: it reports its full size even while the drive under it fills up, so the
+   app's free-space check and old-version cleanup are misled, and a full drive can damage the container.
+3. Mount it (pick a drive letter, enter the password), then name the mounted drive `OFFLINE-A` (or B, C ...) in
+   File Explorer, and set it up under **Drives...** like any other drive.
+4. In VeraCrypt, **Tools > Backup Volume Header...** and keep that file somewhere else than on the drive: if the
+   start of the drive is ever damaged, it is the only way back in. Keep the password somewhere safe too - not on
+   the drive or a note in its box. Without the password nobody, including you, can read the backup.
+
+**Every time:** plug the drive in, mount it in VeraCrypt, **Start copy**. The window marks the drive
+`[VeraCrypt]` and shows a **Dismount X:** button. When the copy is done, the app says *dismount, then unplug*
+instead of *safe to unplug* - an encrypted drive is only finished once VeraCrypt has dismounted it. Click
+**Dismount X:** (or dismount it in VeraCrypt), then unplug. With **Dismount VeraCrypt drives after a copy that
+went well** ticked in Settings, the app does that itself after each good copy; a copy that failed or was cancelled
+leaves the drive mounted so you can look at it.
+
+The app asks VeraCrypt to dismount (`VeraCrypt.exe /dismount X /quit /silent`) and never forces it. If a File
+Explorer window or a program still has files open on the drive, VeraCrypt refuses and the app says so - close them
+and click Dismount again. VeraCrypt.exe is found through its installer's entry in Windows; for a portable VeraCrypt,
+put its path in `OfflineBackup.ini` under `[General]` as `VeraCryptExe=E:\VeraCrypt\VeraCrypt-x64.exe`.
+
+When the whole USB drive or a partition is encrypted, Windows may also give the encrypted partition itself a drive
+letter and say it **needs to be formatted**. **Never click Format** - that erases the encrypted backup. Click
+Cancel; the backup is reached through the letter VeraCrypt mounts.
 
 ## Not done yet
 

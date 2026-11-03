@@ -1,12 +1,12 @@
 object FormSettings: TFormSettings
   Left = 420
-  Height = 670
+  Height = 696
   Top = 90
   Width = 640
   Caption = 'Offline Backup - Settings'
-  ClientHeight = 670
+  ClientHeight = 696
   ClientWidth = 640
-  Constraints.MinHeight = 560
+  Constraints.MinHeight = 586
   Constraints.MinWidth = 560
   Position = poOwnerFormCenter
   PixelsPerInch = 96
@@ -211,10 +211,19 @@ object FormSettings: TFormSettings
     Caption = 'Show a preview of the changes before every copy (otherwise only when files would be deleted or moved)'
     TabOrder = 13
   end
+  object CheckDismount: TCheckBox
+    Left = 12
+    Height = 19
+    Top = 586
+    Width = 616
+    Anchors = [akLeft, akBottom]
+    Caption = 'Dismount VeraCrypt drives after a copy that went well (then they can be unplugged straight away)'
+    TabOrder = 14
+  end
   object LabelLogFile: TLabel
     Left = 12
     Height = 15
-    Top = 598
+    Top = 624
     Width = 60
     Anchors = [akLeft, akBottom]
     Caption = 'Log file:'
@@ -222,7 +231,7 @@ object FormSettings: TFormSettings
   object EditLogFile: TEdit
     Left = 76
     Height = 23
-    Top = 594
+    Top = 620
     Width = 508
     Anchors = [akLeft, akRight, akBottom]
     TabOrder = 9
@@ -230,7 +239,7 @@ object FormSettings: TFormSettings
   object ButtonLogFile: TButton
     Left = 590
     Height = 25
-    Top = 593
+    Top = 619
     Width = 38
     Anchors = [akRight, akBottom]
     Caption = '...'
@@ -240,7 +249,7 @@ object FormSettings: TFormSettings
   object ButtonOK: TButton
     Left = 452
     Height = 28
-    Top = 630
+    Top = 656
     Width = 84
     Anchors = [akRight, akBottom]
     Caption = 'OK'
@@ -251,7 +260,7 @@ object FormSettings: TFormSettings
   object ButtonCancel: TButton
     Left = 544
     Height = 28
-    Top = 630
+    Top = 656
     Width = 84
     Anchors = [akRight, akBottom]
     Cancel = True

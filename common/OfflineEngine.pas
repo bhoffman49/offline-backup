@@ -52,6 +52,8 @@ type
     LogFile: string;
     // show the preview before every copy; False: only when something would be deleted from the drive
     PreviewAlways: Boolean;
+    DismountAfterCopy: Boolean;  // VeraCrypt drives are dismounted when their copy went well
+    VeraCryptExe: string;        // VeraCrypt.exe for a portable VeraCrypt; '' = the installed one (only in the INI)
   end;
 
   TOfflineDrive = record
@@ -60,6 +62,7 @@ type
     VolLabel: string;            // 'OFFLINE-B'
     SetUp: Boolean;              // has a drive map (OFFLINE-BACKUP.ini) with a folder list; anything else is not copied to
     Description: string;         // from the drive map
+    VeraCrypt: Boolean;          // a mounted VeraCrypt volume: dismount it, then unplug
   end;
   TOfflineDriveArray = array of TOfflineDrive;
 
@@ -175,6 +178,8 @@ type
     FCopied: TPathList;          // source paths robocopy copied in the folder just done (for the checksums)
     FLastReport: DWORD;
     FHistorySaved: Boolean;
+    FVeraCrypt: Boolean;
+    FDismounted: Boolean;
     function DoRun: TCopyResult;
     procedure MoveRemovedFolders(const Stamp: string);
     procedure SaveHistory(R: TCopyResult);
@@ -215,6 +220,9 @@ type
     property OnMissing: TMissingEvent read FOnMissing write FOnMissing;
     // when assigned, the preview replaces the safety-check question (its Warning says why)
     property OnPreview: TPreviewEvent read FOnPreview write FOnPreview;
+    // after Run: the drive is a VeraCrypt volume, and whether it was dismounted (DismountAfterCopy)
+    property VeraCrypt: Boolean read FVeraCrypt;
+    property Dismounted: Boolean read FDismounted;
   end;
 
   { Runs a TOfflineCopy in the background; its events fire on the main thread. }
@@ -298,6 +306,14 @@ function FileMd5(const Path: string; out Md5: string): Boolean;
 function CheckStatusText(S: TCheckStatus): string;   // 'ok', 'BAD', 'missing', 'could not read'
 function FindOfflineDrives: TOfflineDriveArray;
 function IsOfflineLabel(const S: string): Boolean;
+// VeraCrypt stays a separate program: it mounts the volume and asks for the password, never this app.
+// IsVeraCryptVolume: the letter is a mounted VeraCrypt volume (its device is \Device\VeraCryptVolume<letter>)
+function IsVeraCryptVolume(Letter: Char): Boolean;
+// VeraCrypt.exe: Configured if it exists, else the installed one (Uninstall entry, then Program Files); '' if none
+function FindVeraCrypt(const Configured: string): string;
+// VeraCrypt.exe /dismount <letter> /quit /silent - never forced. False when the volume is still mounted
+// afterwards (files open on it, VeraCrypt not found); Problem says why, in words for the user
+function DismountVeraCrypt(const Configured: string; Letter: Char; out Problem: string): Boolean;
 function FormatGB(Bytes: Int64): string;
 function FormatSize(Bytes: Int64): string;
 function FormatSpeed(BytesPerSec: Int64): string;
@@ -328,6 +344,13 @@ function CreateProcessW_(lpApplicationName, lpCommandLine: PWideChar; lpProcessA
   lpStartupInfo, lpProcessInformation: Pointer): BOOL; stdcall; external kernel32 name 'CreateProcessW';
 function GetTempPathW_(nBufferLength: DWORD; lpBuffer: PWideChar): DWORD; stdcall; external kernel32 name 'GetTempPathW';
 function GetComputerNameW_(lpBuffer: PWideChar; var nSize: DWORD): BOOL; stdcall; external kernel32 name 'GetComputerNameW';
+function QueryDosDeviceW_(lpDeviceName, lpTargetPath: PWideChar; ucchMax: DWORD): DWORD; stdcall;
+  external kernel32 name 'QueryDosDeviceW';
+function RegOpenKeyExW_(Key: HKEY; lpSubKey: PWideChar; ulOptions: DWORD; samDesired: DWORD; out Res: HKEY): Longint;
+  stdcall; external 'advapi32.dll' name 'RegOpenKeyExW';
+function RegQueryValueExW_(Key: HKEY; lpValueName: PWideChar; lpReserved: Pointer; lpType: PDWORD; lpData: Pointer;
+  lpcbData: PDWORD): Longint; stdcall; external 'advapi32.dll' name 'RegQueryValueExW';
+function RegCloseKey_(Key: HKEY): Longint; stdcall; external 'advapi32.dll' name 'RegCloseKey';
 
 type
   TIoCounters = record
@@ -352,6 +375,8 @@ begin
   Result.MaxDriveFullPct := 85;
   Result.LogFile := ExtractFilePath(SettingsFileName) + 'offline-copy.log';
   Result.PreviewAlways := True;
+  Result.DismountAfterCopy := False;
+  Result.VeraCryptExe := '';
 end;
 
 { The letter of the drive Windows is on - never an OFFLINE target }
@@ -925,6 +950,8 @@ begin
   Result.LogFile := IniStr(E, 'General', 'LogFile', Result.LogFile);
   if Result.LogFile = '' then Result.LogFile := DefaultSettings.LogFile;
   Result.PreviewAlways := IniStr(E, 'General', 'PreviewAlways', '1') <> '0';
+  Result.DismountAfterCopy := IniStr(E, 'General', 'DismountAfterCopy', '0') = '1';
+  Result.VeraCryptExe := IniStr(E, 'General', 'VeraCryptExe', '');
   // a file without a [Sources] section keeps the default sources; Count=0 means none
   if IniHas(E, 'Sources', 'Count') then
   begin
@@ -968,6 +995,9 @@ begin
     'MaxDriveFullPct=' + IntToStr(S.MaxDriveFullPct) + #13#10 +
     'LogFile=' + S.LogFile + #13#10 +
     'PreviewAlways=' + IntToStr(Ord(S.PreviewAlways)) + #13#10 +
+    'DismountAfterCopy=' + IntToStr(Ord(S.DismountAfterCopy)) + #13#10 +
+    // empty: the installed VeraCrypt; a portable VeraCrypt's VeraCrypt.exe can be put here
+    'VeraCryptExe=' + S.VeraCryptExe + #13#10 +
     // the count also tells LoadSettings that an empty [Exclude] really is empty
     'ExcludeCount=' + IntToStr(Length(S.Exclude)) + #13#10 +
     #13#10'[Sources]'#13#10 +
@@ -1633,10 +1663,126 @@ begin
       Result[N].VolLabel := PWideChar(@Buf[0]);
       Result[N].SetUp := ReadDriveInfo(Root, Info) and Info.HasList;
       Result[N].Description := Info.Description;
+      Result[N].VeraCrypt := IsVeraCryptVolume(C);
     end;
   finally
     SetErrorMode(OldMode);
   end;
+end;
+
+{ ---------- VeraCrypt ---------- }
+
+function IsVeraCryptVolume(Letter: Char): Boolean;
+var
+  Buf: array[0..1023] of WideChar;
+  Dev: string;
+begin
+  Result := False;
+  if not CharInSet(UpCase(Letter), ['A'..'Z']) then Exit;
+  Dev := UpCase(Letter) + ':';
+  FillChar(Buf, SizeOf(Buf), 0);
+  if QueryDosDeviceW_(PWideChar(Dev), Buf, Length(Buf)) = 0 then Exit;
+  Result := Pos('\DEVICE\VERACRYPTVOLUME', UpperCase(string(PWideChar(@Buf[0])))) = 1;
+end;
+
+{ A string value of VeraCrypt's Uninstall entry, '' if there is none }
+function VeraCryptUninstallValue(const Name: string): string;
+const
+  KEY_WOW64_64KEY = $0100;
+var
+  Key: HKEY;
+  Buf: array[0..1023] of WideChar;
+  Size, Kind: DWORD;
+begin
+  Result := '';
+  if RegOpenKeyExW_(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VeraCrypt', 0,
+    KEY_READ or KEY_WOW64_64KEY, Key) <> 0 then Exit;
+  try
+    FillChar(Buf, SizeOf(Buf), 0);
+    Size := SizeOf(Buf) - SizeOf(WideChar);
+    if (RegQueryValueExW_(Key, PWideChar(Name), nil, @Kind, @Buf[0], @Size) = 0) and
+      (Kind in [REG_SZ, REG_EXPAND_SZ]) then Result := Trim(string(PWideChar(@Buf[0])));
+  finally
+    RegCloseKey_(Key);
+  end;
+end;
+
+function FindVeraCrypt(const Configured: string): string;
+var
+  S: string;
+  Buf: array[0..MAX_PATH] of WideChar;
+  N: DWORD;
+begin
+  Result := Trim(Configured);
+  if (Result <> '') and FileExists(Result) then Exit;
+  // the installer leaves no InstallLocation, but its DisplayIcon / UninstallString point at
+  // "C:\Program Files\VeraCrypt\VeraCrypt Setup.exe" - VeraCrypt.exe is next to it
+  S := VeraCryptUninstallValue('InstallLocation');
+  if S <> '' then S := WithSlash(S)
+  else
+  begin
+    S := VeraCryptUninstallValue('DisplayIcon');
+    if S = '' then S := VeraCryptUninstallValue('UninstallString');
+    if (S <> '') and (S[1] = '"') then
+    begin
+      Delete(S, 1, 1);
+      if Pos('"', S) > 0 then S := Copy(S, 1, Pos('"', S) - 1);
+    end;
+    S := ExtractFilePath(S);
+  end;
+  if (S <> '') and FileExists(S + 'VeraCrypt.exe') then Exit(S + 'VeraCrypt.exe');
+  N := GetEnvironmentVariableW('ProgramFiles', Buf, Length(Buf));
+  SetString(S, Buf, N);
+  Result := WithSlash(S) + 'VeraCrypt\VeraCrypt.exe';
+  if (S = '') or not FileExists(Result) then Result := '';
+end;
+
+function DismountVeraCrypt(const Configured: string; Letter: Char; out Problem: string): Boolean;
+var
+  Exe, Cmd, Dir: string;
+  SI: TStartupInfoW;
+  PI: TProcessInformation;
+  Buf: array[0..1023] of WideChar;
+  N: DWORD;
+begin
+  Problem := '';
+  Letter := UpCase(Letter);
+  if not IsVeraCryptVolume(Letter) then Exit(True);     // already dismounted
+  Exe := FindVeraCrypt(Configured);
+  if Exe = '' then
+  begin
+    Problem := 'VeraCrypt.exe was not found - dismount ' + Letter + ': in VeraCrypt';
+    Exit(False);
+  end;
+  // the app's own current folder on the volume would be an open file of its own
+  N := GetCurrentDirectoryW(Length(Buf), Buf);
+  SetString(Dir, Buf, N);
+  if SameText(Copy(Dir, 1, 2), Letter + ':') then
+  begin
+    N := GetWindowsDirectoryW(Buf, Length(Buf));
+    SetString(Dir, Buf, N);
+    SetCurrentDirectoryW(PWideChar(Dir));
+  end;
+  FillChar(SI, SizeOf(SI), 0);
+  SI.cb := SizeOf(SI);
+  FillChar(PI, SizeOf(PI), 0);
+  // never /force: with files open VeraCrypt refuses, and the user closes them
+  Cmd := '"' + Exe + '" /dismount ' + Letter + ' /quit /silent';
+  UniqueString(Cmd);
+  if not CreateProcessW_(nil, PWideChar(Cmd), nil, nil, False, CREATE_NO_WINDOW, nil, nil, @SI, @PI) then
+  begin
+    Problem := 'could not start ' + Exe + ' - dismount ' + Letter + ': in VeraCrypt';
+    Exit(False);
+  end;
+  CloseHandle(PI.hThread);
+  if WaitForSingleObject(PI.hProcess, 60000) = WAIT_TIMEOUT then
+    Problem := 'VeraCrypt did not finish within a minute - look at VeraCrypt''s window';
+  CloseHandle(PI.hProcess);
+  Result := not IsVeraCryptVolume(Letter);
+  if not Result and (Problem = '') then
+    Problem := 'VeraCrypt could not dismount ' + Letter + ': - something still has files open on it (a File ' +
+      'Explorer window, a program). Close them and try again, or dismount it in VeraCrypt';
+  if Result then Problem := '';
 end;
 
 { ---------- TOfflineCopy ---------- }
@@ -2740,6 +2886,8 @@ begin
 end;
 
 function TOfflineCopy.Run: TCopyResult;
+var
+  Problem: string;
 begin
   Result := crFailed;
   if not CheckTarget then Exit;
@@ -2759,8 +2907,16 @@ begin
   end;
   FList := Copy(FInfo.Sources);
   FHistorySaved := False;
+  FVeraCrypt := (Length(FDrive) = 3) and IsVeraCryptVolume(FDrive[1]);
   Result := DoRun;
   if not FHistorySaved then SaveHistory(Result);
+  // only after a copy that went well - otherwise the drive stays mounted so the user can look at it
+  if FVeraCrypt and FSettings.DismountAfterCopy and (Result in [crOk, crIncomplete]) then
+  begin
+    FDismounted := DismountVeraCrypt(FSettings.VeraCryptExe, FDrive[1], Problem);
+    if FDismounted then Log(DriveTag + ': dismounted in VeraCrypt - safe to unplug')
+    else Log(DriveTag + ': not dismounted: ' + Problem);
+  end;
 end;
 
 function TOfflineCopy.DoRun: TCopyResult;
@@ -3046,7 +3202,10 @@ begin
       end;
       if MissingNames <> '' then Status := 'finished, but not found so not copied: ' + MissingNames
       else Status := 'complete';
-      if Flushed then Log(DriveTag + ': ' + Status + ' - everything written to the drive, safe to unplug')
+      // a VeraCrypt volume is only finished on the USB drive once VeraCrypt has dismounted it
+      if FVeraCrypt and FSettings.DismountAfterCopy then Log(DriveTag + ': ' + Status + ' - dismounting it in VeraCrypt')
+      else if FVeraCrypt then Log(DriveTag + ': ' + Status + ' - dismount it in VeraCrypt, then unplug')
+      else if Flushed then Log(DriveTag + ': ' + Status + ' - everything written to the drive, safe to unplug')
       else Log(DriveTag + ': ' + Status + ' - could not flush the drive''s write cache; wait 30 seconds before unplugging');
       if MissingNames <> '' then Result := crIncomplete else Result := crOk;
     except
