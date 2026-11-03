@@ -1394,6 +1394,13 @@ begin
 end;
 
 { Size and last-write time of a file; a checksum is only trusted while these are unchanged }
+{ Two last-write times (FILETIME, 100 ns units) that are the same file time as robocopy /FFT sees it: FAT32 and exFAT
+  drives keep times in 2-second steps, so a copy there can differ from its NTFS source by up to 2 seconds }
+function SameFileTime(A, B: Int64): Boolean;
+begin
+  Result := Abs(A - B) <= 20000000;
+end;
+
 function FileStamp(const Path: string; out Size, Time: Int64): Boolean;
 var
   H: THandle;
@@ -2173,7 +2180,7 @@ begin
         Sums[I].Ok := FileStamp(SrcRoot + Plan.Items[Adds[I]].Rel, Size, Sums[I].Time) and
           FileSums(SrcRoot + Plan.Items[Adds[I]].Rel, False, Sums[I].Crc, Sums[I].Md5, nil, @FCancelled);
       end;
-      if not Sums[I].Ok or (Sums[I].Time <> List[K].Time) or (Sums[I].Crc <> List[K].Crc) or
+      if not Sums[I].Ok or not SameFileTime(Sums[I].Time, List[K].Time) or (Sums[I].Crc <> List[K].Crc) or
          ((List[K].Md5 <> '') and (List[K].Md5 <> Sums[I].Md5)) then Continue;
       Used[J] := True;
       Plan.Items[Adds[I]].Kind := pkMove;
@@ -2308,7 +2315,7 @@ begin
     if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
     Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
     if FileSums(FCopied[I], False, Crc, Md5, nil, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
-       FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and (STime = DTime) then
+       FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
     begin
       SetLength(Added, Length(Added) + 1);
       Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);

@@ -585,6 +585,23 @@ begin
   CloseHandle(F);
 end;
 
+{ Moves a file's last-write time by Ticks (100 ns units) }
+procedure ShiftTime(const Path: string; Ticks: Int64);
+var
+  F: THandle;
+  Created, Accessed, Written: TFileTime;
+  T: Int64;
+begin
+  F := CreateFileW(PWideChar(Path), GENERIC_READ or FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nil, OPEN_EXISTING, 0, 0);
+  GetFileTime(F, @Created, @Accessed, @Written);
+  T := (Int64(Written.dwHighDateTime) shl 32) or Written.dwLowDateTime;
+  Inc(T, Ticks);
+  Written.dwLowDateTime := DWORD(T and $FFFFFFFF);
+  Written.dwHighDateTime := DWORD(T shr 32);
+  SetFileTime(F, nil, nil, @Written);
+  CloseHandle(F);
+end;
+
 function PreviewMove(const FromRel, ToRel: string): Boolean;
 var
   I: Integer;
@@ -655,8 +672,18 @@ begin
   // moved and then changed (time differs): not a move either
   RenameFile(Src + 'y.mp3', Src + 'y2.mp3');
   WriteFile(Src + 'y2.mp3', 'the y song');
+  ShiftTime(Src + 'y2.mp3', Int64(3600) * 10000000);   // clearly changed, not within FAT's 2 seconds
   R := RunWithPreview(S, D5);
   Check((PreviewCount(pkMove) = 0) and PreviewHas(pkAdd, 'y2.mp3'), 'moved and touched: add + delete');
+
+  // exFAT / FAT32 drives keep file times in 2-second steps, so a drive copy can be up to 2 s off its source:
+  // a moved file whose source time is 1 s off the recorded drive time is still a move
+  ShiftTime(Src + 'sub\x.mp3', 10000000);
+  RenameFile(Src + 'sub\x.mp3', Src + 'x-moved.mp3');
+  R := RunWithPreview(S, D5);
+  Check(PreviewMove('sub\x.mp3', 'x-moved.mp3') and (PreviewCount(pkAdd) = 0),
+    'a time 1 second off (FAT/exFAT drives) still counts as the same file');
+  Check((R = crOk) and (H.Last.FilesTotal = 0) and FileExists(M5 + 'x-moved.mp3'), '... moved, nothing copied');
 
   R := RunVerifyOn(D5);
   Check((R = crOk) and (H.Last.Errors = 0) and (H.Last.Skipped = 0), 'Verify afterwards: all match, none new');
