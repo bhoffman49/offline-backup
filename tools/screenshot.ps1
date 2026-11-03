@@ -12,6 +12,8 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  // the visible frame - GetWindowRect includes Windows 10/11's invisible resize border
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
   public struct RECT { public int L, T, R, B; }
   // the app's hidden windows can share the title, so only visible ones count
   public static IntPtr FindVisible(string title) {
@@ -27,7 +29,7 @@ if ($h -eq [IntPtr]::Zero) { Write-Error "no visible window titled '$Title'"; ex
 [W]::SetForegroundWindow($h) | Out-Null
 Start-Sleep -Milliseconds 400
 $r = New-Object W+RECT
-[W]::GetWindowRect($h, [ref]$r) | Out-Null
+if ([W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) -ne 0) { [W]::GetWindowRect($h, [ref]$r) | Out-Null }   # 9 = DWMWA_EXTENDED_FRAME_BOUNDS
 $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)

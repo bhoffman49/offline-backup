@@ -19,6 +19,37 @@ Version **0.9.1** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md
 
 Needs Windows 10 or 11, 64-bit (robocopy is part of Windows). The zip has a short how-to (`README.txt`).
 
+## Screenshots
+
+**A new drive is set up first:** what it is for and which folders it backs up. Nothing is copied before that.
+
+![Setting up a new drive](docs/screenshots/02-set-up-drive.png)
+
+**A preview before every copy** - nothing on the drive changes until you click Copy:
+
+![Preview of the first copy](docs/screenshots/03-preview-first-copy.png)
+
+**Moved and renamed files** are moved on the drive instead of copied again:
+
+![Preview with moved files](docs/screenshots/05-preview-moves.png)
+
+**When a run ends**, a small window says how each drive went:
+
+![Finished](docs/screenshots/04-finished.png)
+
+**Check MD5...** reads the files back from the drive and checks them against their MD5 checksums:
+
+![MD5 check](docs/screenshots/06-md5-check.png)
+
+<details>
+<summary>More: the main window with a new drive, and Settings</summary>
+
+![A new OFFLINE drive is plugged in](docs/screenshots/01-new-drive.png)
+
+![Settings](docs/screenshots/07-settings.png)
+
+</details>
+
 ## How it works
 
 Each folder lands on the drive under its own drive letter: `D:\MUSIC` -> `<drive>\D-mirror\MUSIC`,
@@ -53,6 +84,7 @@ lazarus\               LCL edition: OfflineBackup.lpi/.lpr, build.cmd, the same 
 tests\                 EngineTest.dpr - runs the engine against throw-away folders; run-tests.cmd
                        builds and runs it with both compilers
 tools\                 make-icon.py, screenshot.ps1, release-readme.txt (the README.txt in the zip)
+docs\screenshots\      the README's screenshots (taken with tools\screenshot.ps1 from a demo copy)
 make-release.cmd       tests + both builds + the download zip in dist\
 build\, dist\          compiler output and release zips (not in git)
 ```

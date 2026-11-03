@@ -67,7 +67,7 @@ object FormDrive: TFormDrive
   end
   object GroupFolders: TGroupBox
     Left = 12
-    Height = 232
+    Height = 252
     Top = 130
     Width = 656
     Anchors = [akTop, akLeft, akRight]
@@ -151,14 +151,14 @@ object FormDrive: TFormDrive
   object LabelHistory: TLabel
     Left = 12
     Height = 15
-    Top = 372
+    Top = 392
     Width = 400
     Caption = 'Copies to this drive, newest first:'
   end
   object ListHistory: TListView
     Left = 12
-    Height = 216
-    Top = 392
+    Height = 196
+    Top = 412
     Width = 656
     Anchors = [akTop, akLeft, akRight, akBottom]
     Columns = <
