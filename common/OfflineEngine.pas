@@ -275,7 +275,7 @@ type
 
 function PreviewKindText(K: TPreviewKind): string;   // 'Files to add', ...
 const
-  AppVersion = '0.9.2';         // shown in the window title; make-release.cmd reads it from this line
+  AppVersion = '0.10.0';         // shown in the window title; make-release.cmd reads it from this line
 
 function DefaultSettings: TBackupSettings;
 // settings file: OfflineBackup.ini next to the exe (each edition has its own), or in %APPDATA%\OfflineBackup\
@@ -2920,15 +2920,15 @@ begin
   // only drives that have been set up (they carry a drive map) are copied to
   if not ReadDriveInfo(FDrive, FInfo) then
   begin
-    Log(DriveTag + ': new drive, not set up yet - nothing done. Set it up under Drives... first.');
-    SkipReason := 'new drive, not set up yet - set it up under Drives... first';
+    Log(DriveTag + ': new drive, not set up yet - nothing done. Set it up under Drives first.');
+    SkipReason := 'new drive, not set up yet - set it up under Drives first';
     Exit(crSkipped);
   end;
   // ... and that have had their folders chosen - a drive is never filled with folders it was not set up for
   if not FInfo.HasList then
   begin
-    Log(DriveTag + ': no folders chosen for this drive yet - nothing done. Choose them under Drives... first.');
-    SkipReason := 'no folders chosen for this drive yet - choose them under Drives...';
+    Log(DriveTag + ': no folders chosen for this drive yet - nothing done. Choose them under Drives first.');
+    SkipReason := 'no folders chosen for this drive yet - choose them under Drives';
     Exit(crSkipped);
   end;
   FList := Copy(FInfo.Sources);

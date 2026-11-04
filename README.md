@@ -6,16 +6,16 @@ them. Each drive knows which folders it backs up. Before anything changes on a d
 that would be overwritten or deleted are kept in `_versions` first; moved files are moved on the drive instead
 of copied again; and CRC32 / MD5 checksums let you verify a drive at any time, even on another PC.
 
-Version **0.9.2** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
+Version **0.10.0** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
 
 ## Download and install
 
-1. Download `OfflineBackup-0.9.2-win64.zip` from the Releases page and unzip it to a folder you can write to
+1. Download `OfflineBackup-0.10.0-win64.zip` from the Releases page and unzip it to a folder you can write to
    (for example `Documents\OfflineBackup`).
 2. Start `OfflineBackup.exe` - it sits in the tray (add `/show` to open its window too).
    Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.
-3. Name a USB drive `OFFLINE-A` in File Explorer, plug it in, and set it up under **Drives...** (what it is
-   for, which folders it backs up). Then **Start copy**.
+3. Name a USB drive `OFFLINE-A` in File Explorer, plug it in, and set it up under **Drives** (what it is
+   for, which folders it backs up). Then **Backup** > **Start copy**.
 
 Needs Windows 10 or 11, 64-bit (robocopy is part of Windows). The zip has a short how-to (`README.txt`).
 
@@ -37,7 +37,7 @@ Needs Windows 10 or 11, 64-bit (robocopy is part of Windows). The zip has a shor
 
 ![Finished](docs/screenshots/04-finished.png)
 
-**Check MD5...** reads the files back from the drive and checks them against their MD5 checksums:
+**MD5 check** reads the files back from the drive and checks them against their MD5 checksums:
 
 ![MD5 check](docs/screenshots/06-md5-check.png)
 
@@ -77,13 +77,17 @@ common\
                        prune, LAST-COPY.txt, flush. No UI code. Compiles under both compilers
                        ({$mode delphiunicode} under FPC).
   DriveWatcher.pas     WM_DEVICECHANGE via its own hidden window (works the same in VCL and LCL)
+  SideBar.pas          the main window's left column of large icon buttons (drawn the same in VCL and LCL)
   OfflineBackup.ico    app + tray icon (made by tools\make-icon.py)
-delphi\                VCL edition: OfflineBackup.dpr, .rc + manifest, build.cmd, and the forms (.pas/.dfm):
-                       MainForm, SettingsForm, SourceForm, DriveForm, PreviewForm, CheckForm
-lazarus\               LCL edition: OfflineBackup.lpi/.lpr, build.cmd, the same forms (.pas/.lfm)
+  icons\               the sidebar's icons (made by tools\make-sidebar-icons.py)
+delphi\                VCL edition: OfflineBackup.dpr, .rc + manifest, build.cmd, the main window (MainForm),
+                       its pages (DrivesPage, CheckPage, SettingsPage - frames) and the pop-ups (PreviewForm,
+                       SourceForm), as .pas/.dfm
+lazarus\               LCL edition: OfflineBackup.lpi/.lpr, build.cmd, the same forms and pages (.pas/.lfm)
 tests\                 EngineTest.dpr - runs the engine against throw-away folders; run-tests.cmd
                        builds and runs it with both compilers
-tools\                 make-icon.py, screenshot.ps1, release-readme.txt (the README.txt in the zip)
+tools\                 make-icon.py, make-sidebar-icons.py, screenshot.ps1, release-readme.txt (the README.txt in
+                       the zip)
 docs\screenshots\      the README's screenshots (taken with tools\screenshot.ps1 from a demo copy)
 make-release.cmd       tests + both builds + the download zip in dist\
 build\, dist\          compiler output and release zips (not in git)
@@ -126,10 +130,20 @@ creates a `.dproj` and may regenerate `OfflineBackup.res` with its own icon. Set
 
 Start `OfflineBackup.exe` (add `/show` to open the window as well). It sits in the tray. When an
 `OFFLINE-x` drive is plugged in while the window is closed, it shows a balloon and opens its window.
-**Start copy** copies to every set-up OFFLINE drive that is plugged in, one after another, each with its own
-folders. While it copies, the window shows time left, files done / failed / skipped / total and the transfer
-rate (also in the tray icon's tooltip); when the run ends, a small window says how each drive went. Closing the
-window only hides it; **Exit** is on the tray icon's menu.
+
+The window has a sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and
+**Settings** - tabs along the top of each area, the area's buttons on the right, and a status bar at the bottom
+(what is happening, and how many OFFLINE drives are plugged in).
+
+**Backup** lists the OFFLINE drives plugged in. **Start copy** copies to every set-up drive among them, one after
+another, each with its own folders. Below the list (drag the divider to resize it) the copy shows the file being
+copied with a bar of its own, a bar for the whole run, time left, files done / failed / skipped / total and the
+transfer rate (also in the tray icon's tooltip); when the run ends, a small window says how each drive went. The
+**Log** tab has everything the app did. Closing the window only hides it; **Exit** is on the tray icon's menu.
+
+Changes on the **Drives** and **Settings** pages wait for **Save**; **Undo changes** goes back to what was
+saved, and leaving a page with unsaved changes asks first. While a copy runs, every page can be looked at but
+not changed.
 
 ## Drives
 
@@ -147,7 +161,7 @@ A drive is copied to only when it has a map **with a folder list**. A drive with
 without a folder list (written before drives had their own lists) counts as "no folders chosen yet". Both show
 in the window, Start copy skips them, and the engine refuses them too.
 
-**Drives...** (window button or tray menu) picks a plugged-in drive and, for that drive:
+**Drives** (sidebar or tray menu) picks a plugged-in drive at the top and, for that drive, on the **Folders** tab:
 
 - **What this drive is for** - a short description
 - **Folders this drive backs up** - `source  to  <letter>-mirror\<name>`. **Add folder...** picks any folder on
@@ -158,7 +172,8 @@ in the window, Start copy skips them, and the engine refuses them too.
     `_versions\<date>\<letter>-mirror\<name>` and cleared out like other old versions. Changing a folder's
     path or name does the same for the old copy. A removed folder added back before that copy stays.
 - **Set up this drive** / **Save** writes the map; nothing else on the drive changes.
-- the drive's history, newest first.
+
+The **History** tab lists the copies to the drive, newest first.
 
 When a set-up drive is plugged in, the log shows what it is for, which folders it backs up and how its last
 copy went.
@@ -191,10 +206,10 @@ header), so ExactFile, md5sum and similar tools can check a drive without this a
 source still has the size and time the drive copy has. Files robocopy deletes leave the list; a removed folder's
 list goes with it.
 
-**Verify drive...** (in Drives...) reads every file of the drive's folders back from the drive - past the Windows
+**Verify drive...** (in Drives) reads every file of the drive's folders back from the drive - past the Windows
 file cache, so it really is the drive being read - and compares it with its recorded CRC32. It needs nothing from
-the PC's folders, so a drive that has sat in a drawer can be checked anywhere. The window shows progress
-(Checked / Bad / New checksums) and can be cancelled. Results:
+the PC's folders, so a drive that has sat in a drawer can be checked anywhere. Its progress (Checked / Bad /
+New checksums) shows under **Backup**, and it can be cancelled there. Results:
 
 - **ok** - matches.
 - **bad** - listed in the log. Its date on the drive is set back to 1990, so the next copy replaces it from the
@@ -205,24 +220,28 @@ the PC's folders, so a drive that has sat in a drawer can be checked anywhere. T
 Each Verify goes into the drive's history ("verified ok", "verify: 2 bad"). Lists from before MD5s were kept get
 their MD5s (and their `.md5` file) at the next Verify.
 
-**Check MD5...** (main window and tray menu) checks the files listed in any `.md5` file - one of the drive's, or
-one made by ExactFile or md5sum (`md5 *path` and `md5  path` lines; `;` and `#` comments; paths relative to the
-file's folder). Progress shows Checked / Bad / Missing; the result window lists the files that match, are bad,
-missing or unreadable.
+**MD5 check** (sidebar, or Check MD5 file... on the tray menu) checks the files listed in any `.md5` file - one of
+the drive's, or one made by ExactFile or md5sum (`md5 *path` and `md5  path` lines; `;` and `#` comments; paths
+relative to the file's folder). **Open MD5 file...** starts in the plugged-in drive's mirror folder, where its
+`.md5` files are. Progress shows Checked / Bad / Missing under **Backup**; then the page shows how many files
+match, are bad, missing or unreadable (**Summary** tab) and which ones (**Files** tab). **Check again** checks the
+same file again.
 
 ## Settings
 
-**Settings...** (window button or tray menu; not while a copy runs) holds what is the same for every drive:
+**Settings** (sidebar or tray menu) holds what is the same for every drive, on five tabs:
 
-- **Starting folders** - the folders Drives... offers with "Add starting folders" when you set up a drive
+- **Starting folders** - the folders Drives offers with "Add starting folders" when you set up a drive
   (empty at first - you add your own). The name on the drive is the folder's name, with ` (2)`, ` (3)` ...
   if that name is already used on the same drive letter.
 - **Folders never copied** - robocopy `/XD`: a full path, or a name skipped everywhere. `*.partial` is
   always skipped; nothing else is by default. A folder excluded after it was copied stays on the drives as
   it was.
-- safety check %, minimum files, days to keep old versions, max drive full %, log file (default:
-  `offline-copy.log` next to the settings file).
-- **Dismount VeraCrypt drives after a copy that went well** (off by default) - see below.
+- **Safety and versions** - safety check %, minimum files, days to keep old versions, max drive full %, and
+  whether the preview shows before every copy.
+- **Encryption** - **Dismount VeraCrypt drives after a copy that went well** (off by default; see below), and
+  where VeraCrypt was found.
+- **Log file** (default: `offline-copy.log` next to the settings file), and where the settings are kept.
 
 Saved as `OfflineBackup.ini` (UTF-8) next to the exe, so the Delphi and Lazarus builds each have their own
 (in `%APPDATA%\OfflineBackup\` if the exe's folder can't be written to). No file = the defaults above. If a
@@ -243,7 +262,7 @@ and asks for the password - this app never sees the password and never stores it
    Not a *dynamic* (sparse) container: it reports its full size even while the drive under it fills up, so the
    app's free-space check and old-version cleanup are misled, and a full drive can damage the container.
 3. Mount it (pick a drive letter, enter the password), then name the mounted drive `OFFLINE-A` (or B, C ...) in
-   File Explorer, and set it up under **Drives...** like any other drive.
+   File Explorer, and set it up under **Drives** like any other drive.
 4. In VeraCrypt, **Tools > Backup Volume Header...** and keep that file somewhere else than on the drive: if the
    start of the drive is ever damaged, it is the only way back in. Keep the password somewhere safe too - not on
    the drive or a note in its box. Without the password nobody, including you, can read the backup.
@@ -252,7 +271,7 @@ and asks for the password - this app never sees the password and never stores it
 `[VeraCrypt]` and shows a **Dismount X:** button. When the copy is done, the app says *dismount, then unplug*
 instead of *safe to unplug* - an encrypted drive is only finished once VeraCrypt has dismounted it. Click
 **Dismount X:** (or dismount it in VeraCrypt), then unplug. With **Dismount VeraCrypt drives after a copy that
-went well** ticked in Settings, the app does that itself after each good copy; a copy that failed or was cancelled
+went well** ticked in Settings > Encryption, the app does that itself after each good copy; a copy that failed or was cancelled
 leaves the drive mounted so you can look at it.
 
 The app asks VeraCrypt to dismount (`VeraCrypt.exe /dismount X /quit /silent`) and never forces it. If a File

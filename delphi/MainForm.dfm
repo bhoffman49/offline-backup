@@ -295,7 +295,7 @@ object FormMain: TFormMain
       OnClick = ButtonStartClick
     end
     object MenuSettings: TMenuItem
-      Caption = 'Settings...'
+      Caption = 'Settings'
       OnClick = MenuSettingsClick
     end
     object MenuCheck: TMenuItem
@@ -303,7 +303,7 @@ object FormMain: TFormMain
       OnClick = MenuCheckClick
     end
     object MenuDrives: TMenuItem
-      Caption = 'Drives...'
+      Caption = 'Drives'
       OnClick = MenuDrivesClick
     end
     object MenuDismount: TMenuItem

@@ -33,9 +33,10 @@ FIRST BACKUP
    Rename (or Properties), and type OFFLINE-A. The app only ever writes to drives
    named OFFLINE-A ... OFFLINE-Z - never to any other drive.
 2. Plug it in. The window says it is new.
-3. Click Drives..., type what the drive is for, click Add folder... for each
-   folder it should back up, then Set up this drive.
-4. Click Start copy. A preview shows what will be copied - click Copy.
+3. Click Drives on the left, type what the drive is for, click Add folder... for
+   each folder it should back up, then Set up this drive.
+4. Click Backup on the left, then Start copy. A preview shows what will be copied
+   - click Copy. The progress shows under the list of drives.
 5. When it says "safe to unplug", unplug the drive and keep it somewhere else.
 
 Next time, plug the drive in and click Start copy: only what changed is copied,
@@ -47,13 +48,14 @@ GOOD TO KNOW
 - Nothing on the drive changes before you click Copy in the preview.
 - Files that would be overwritten or deleted are kept in _versions on the drive
   first, for 90 days (Settings), or less when the drive gets full.
-- Drives... > Verify drive reads every file back and checks it against the
-  checksums taken when it was copied. Check MD5... checks any .md5 file - each
+- Drives > Verify drive reads every file back and checks it against the
+  checksums taken when it was copied. MD5 check checks any .md5 file - each
   backed-up folder has one next to it on the drive, readable by other tools too.
 - Each drive keeps its own folder list. Untick a folder to stop updating it;
   Remove it to take its copy off the drive (into _versions).
-- Settings... holds what is the same for every drive: starting folders, folders
+- Settings holds what is the same for every drive: starting folders, folders
   never copied, the safety check, how long old versions are kept, the log file.
+  Changes on the Drives and Settings pages wait until you click Save.
 - Encrypted drives: a drive encrypted with VeraCrypt (veracrypt.fr) works like any
   other once VeraCrypt has mounted it and it is named OFFLINE-x. The app never asks
   for the password. After the copy, click Dismount X: (or dismount it in VeraCrypt),

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.0 - not released yet
+
+- **A new window.** A sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and
+  **Settings** - tabs along the top, the area's buttons on the right and a status bar at the bottom (what is
+  happening, and how many OFFLINE drives are plugged in). Drives, MD5 check and Settings are pages of the main
+  window now instead of separate windows; the preview and the end-of-run summary still pop up, as they ask
+  something. The tray icon and its menu work as before.
+- **Progress under the drive list**, with two bars: the file being copied (its name and how far it is) and the
+  whole run. Drag the divider to give either more room.
+- Changes on the Drives and Settings pages wait for **Save**; **Undo changes** goes back to what was saved, and
+  leaving a page with unsaved changes asks first. While a copy runs, every page can be looked at but not changed.
+- **Open MD5 file...** starts in the plugged-in OFFLINE drive's mirror folder, where its `.md5` files are;
+  **Check again** checks the same file again.
+- Settings shows where VeraCrypt was found and where the settings file is kept.
+
 ## 0.9.2 - 2026-11-03
 
 - VeraCrypt: OFFLINE drives that are mounted VeraCrypt volumes are marked `[VeraCrypt]`, and a **Dismount**
