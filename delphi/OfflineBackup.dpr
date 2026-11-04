@@ -9,7 +9,7 @@ uses
   MainForm in 'MainForm.pas' {FormMain},
   SettingsForm in 'SettingsForm.pas' {FormSettings},
   SourceForm in 'SourceForm.pas' {FormSource},
-  DriveForm in 'DriveForm.pas' {FormDrive},
+  DrivesPage in 'DrivesPage.pas' {FrameDrives: TFrame},
   PreviewForm in 'PreviewForm.pas' {FormPreview},
   CheckForm in 'CheckForm.pas' {FormCheck},
   OfflineEngine in '..\common\OfflineEngine.pas',

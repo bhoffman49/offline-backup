@@ -19,11 +19,15 @@ type
     Enabled: Boolean;                 // False = shown faded, for an area that is still to come
   end;
 
+  // Allow := False keeps the area shown now (it has unsaved changes the user wants to keep)
+  TSideChangingEvent = procedure(Sender: TObject; NewIndex: Integer; var Allow: Boolean) of object;
+
   TSideBar = class(TCustomControl)
   private
     FItems: array of TSideItem;
     FItemIndex: Integer;
     FOnChange: TNotifyEvent;
+    FOnChanging: TSideChangingEvent;
     function Scale(N: Integer): Integer;
     function ItemHeight: Integer;
     function ItemAt(Y: Integer): Integer;
@@ -43,6 +47,7 @@ type
     // setting it calls OnChange too, so the area shown always follows the sidebar
     property ItemIndex: Integer read FItemIndex write SetItemIndex;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    property OnChanging: TSideChangingEvent read FOnChanging write FOnChanging;
   end;
 
 implementation
@@ -153,8 +158,13 @@ begin
 end;
 
 procedure TSideBar.SetItemIndex(Value: Integer);
+var
+  Allow: Boolean;
 begin
   if (Value < 0) or (Value > High(FItems)) or not FItems[Value].Enabled then Exit;
+  Allow := True;
+  if (Value <> FItemIndex) and Assigned(FOnChanging) then FOnChanging(Self, Value, Allow);
+  if not Allow then Exit;
   FItemIndex := Value;
   Invalidate;
   if Assigned(FOnChange) then FOnChange(Self);

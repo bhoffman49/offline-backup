@@ -131,8 +131,8 @@ object FormMain: TFormMain
               Width = 200
             end
             item
+              AutoSize = True
               Caption = 'Last copy'
-              Width = 260
             end>
           ReadOnly = True
           RowSelect = True
@@ -246,7 +246,6 @@ object FormMain: TFormMain
     end
     object MenuDrives: TMenuItem
       Caption = 'Drives...'
-      Enabled = False
       OnClick = MenuDrivesClick
     end
     object MenuDismount: TMenuItem

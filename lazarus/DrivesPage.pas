@@ -1,46 +1,56 @@
-unit DriveForm;
+unit DrivesPage;
 
-{ Drives window of the Lazarus/LCL edition: set up a new OFFLINE drive (write its drive map), say what it is for and
-  which folders it backs up, and see what has been copied to it. The Delphi edition has the same form in
-  ..\delphi\DriveForm.pas. }
+{ Drives area of the Lazarus/LCL main window: set up a new OFFLINE drive (write its drive map), say what it is for and
+  which folders it backs up, and see what has been copied to it. The Delphi edition has the same page in
+  ..\delphi\DrivesPage.pas. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ComCtrls,
+  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls,
   OfflineEngine;
 
 type
-  TFormDrive = class(TForm)
+  TVerifyEvent = procedure(const Drive: TOfflineDrive) of object;
+
+  TFrameDrives = class(TFrame)
+    PanelActions: TPanel;
+    ButtonApply: TButton;
+    ButtonUndo: TButton;
+    ButtonVerify: TButton;
+    ButtonPrepare: TButton;
+    PanelTop: TPanel;
     LabelDrive: TLabel;
     ComboDrives: TComboBox;
     LabelState: TLabel;
+    PageDrive: TPageControl;
+    TabFolders: TTabSheet;
+    PanelDescription: TPanel;
+    PanelFolderButtons: TPanel;
     LabelDescription: TLabel;
     EditDescription: TEdit;
-    ButtonApply: TButton;
-    GroupFolders: TGroupBox;
+    LabelFolders: TLabel;
     ListFolders: TListView;
     ButtonAddFolder: TButton;
     ButtonEditFolder: TButton;
     ButtonRemoveFolder: TButton;
     ButtonStarting: TButton;
     LabelFolderNote: TLabel;
+    TabHistory: TTabSheet;
     LabelHistory: TLabel;
     ListHistory: TListView;
-    ButtonClose: TButton;
-    ButtonVerify: TButton;
     FolderDialog: TSelectDirectoryDialog;
     procedure ComboDrivesChange(Sender: TObject);
     procedure ButtonApplyClick(Sender: TObject);
+    procedure ButtonUndoClick(Sender: TObject);
     procedure ButtonAddFolderClick(Sender: TObject);
     procedure ButtonEditFolderClick(Sender: TObject);
     procedure ButtonRemoveFolderClick(Sender: TObject);
     procedure ButtonStartingClick(Sender: TObject);
     procedure ButtonVerifyClick(Sender: TObject);
     procedure ListFoldersSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
-    procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   private
     FDrives: TOfflineDriveArray;
     FSettings: TBackupSettings;
@@ -48,10 +58,11 @@ type
     FList: TBackupSourceArray;    // the folders being edited
     FRemoved: TPathList;          // drive folders taken off the list (moved to _versions at the next copy)
     FSetUp: Boolean;
-    FChanged: Boolean;            // something was written - the main window refreshes
     FSavedState: string;          // StateText when shown or saved, to spot unsaved edits
     FLastIndex: Integer;
-    FVerify: Integer;             // drive to verify when the window closes, -1 for none
+    FBusy: Boolean;               // a copy, verify or check is running: look, but don't change anything
+    FOnVerify: TVerifyEvent;
+    FOnChanged: TNotifyEvent;
     procedure ShowDrive;
     procedure ShowFolders;
     procedure ReadTicks;
@@ -59,13 +70,17 @@ type
     procedure AddFolder(const Path: string);
     function StateText: string;
     function Apply: Boolean;
-    function AskToSave: Boolean;
     function DriveTag: string;
   public
-    // shows the plugged-in drives, Select first; True if a drive was set up or changed.
-    // Verify: index of a drive to verify now (Verify drive... was pressed), else -1
-    class function Execute(AOwner: TComponent; const Drives: TOfflineDriveArray; Select: Integer;
-      const Settings: TBackupSettings; out Verify: Integer): Boolean;
+    constructor Create(AOwner: TComponent); override;
+    // the drives plugged in now; the drive shown stays (with any unsaved edits) if it is still there
+    procedure SetDrives(const Drives: TOfflineDriveArray; const Settings: TBackupSettings);
+    procedure SetBusy(Busy: Boolean);
+    function Modified: Boolean;
+    // unsaved edits: save them, drop them, or stay. True = go on.
+    function AskToSave: Boolean;
+    property OnVerify: TVerifyEvent read FOnVerify write FOnVerify;      // Verify drive was confirmed
+    property OnChanged: TNotifyEvent read FOnChanged write FOnChanged;   // a drive map was written
   end;
 
 implementation
@@ -75,43 +90,71 @@ uses
 
 {$R *.lfm}
 
-class function TFormDrive.Execute(AOwner: TComponent; const Drives: TOfflineDriveArray; Select: Integer;
-  const Settings: TBackupSettings; out Verify: Integer): Boolean;
-var
-  F: TFormDrive;
-  I: Integer;
+constructor TFrameDrives.Create(AOwner: TComponent);
 begin
-  F := TFormDrive.Create(AOwner);
-  try
-    F.FDrives := Copy(Drives);
-    F.FSettings := Settings;
-    for I := 0 to High(Drives) do
-      F.ComboDrives.Items.Add(Drives[I].VolLabel + ' (' + Copy(Drives[I].Root, 1, 2) + ')');
-    if (Select < 0) or (Select > High(Drives)) then Select := 0;
-    F.ComboDrives.ItemIndex := Select;
-    F.FLastIndex := Select;
-    F.FVerify := -1;
-    F.ShowDrive;
-    F.ShowModal;
-    Result := F.FChanged;
-    Verify := F.FVerify;
-  finally
-    F.Free;
-  end;
+  inherited Create(AOwner);
+  FLastIndex := -1;
 end;
 
-function TFormDrive.DriveTag: string;
+procedure TFrameDrives.SetDrives(const Drives: TOfflineDriveArray; const Settings: TBackupSettings);
+var
+  I, Select: Integer;
+  Keep: Boolean;
+begin
+  FSettings := Settings;
+  Select := -1;
+  if (FLastIndex >= 0) and (FLastIndex <= High(FDrives)) then
+    for I := 0 to High(Drives) do
+      if (Drives[I].Root = FDrives[FLastIndex].Root) and (Drives[I].VolLabel = FDrives[FLastIndex].VolLabel) then
+        Select := I;
+  Keep := (Select >= 0) and Modified;
+  if Select < 0 then
+    for I := High(Drives) downto 0 do      // a new drive first, as that is usually why the page is opened
+      if not Drives[I].SetUp then Select := I;
+  if (Select < 0) and (Length(Drives) > 0) then Select := 0;
+  FDrives := Copy(Drives);
+  ComboDrives.Items.BeginUpdate;
+  try
+    ComboDrives.Items.Clear;
+    for I := 0 to High(FDrives) do
+      ComboDrives.Items.Add(FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + ')');
+  finally
+    ComboDrives.Items.EndUpdate;
+  end;
+  ComboDrives.ItemIndex := Select;
+  FLastIndex := Select;
+  if not Keep then ShowDrive;
+  UpdateButtons;
+end;
+
+procedure TFrameDrives.SetBusy(Busy: Boolean);
+begin
+  FBusy := Busy;
+  UpdateButtons;
+end;
+
+function TFrameDrives.DriveTag: string;
 begin
   Result := ComboDrives.Items[FLastIndex];
 end;
 
-procedure TFormDrive.ShowDrive;
+procedure TFrameDrives.ShowDrive;
 var
   I: Integer;
   Item: TListItem;
 begin
   ListHistory.Items.Clear;
-  if ComboDrives.ItemIndex < 0 then Exit;
+  if ComboDrives.ItemIndex < 0 then
+  begin
+    LabelState.Caption := 'No OFFLINE-x drive plugged in. Plug one in to set it up or see what it backs up.';
+    EditDescription.Text := '';
+    FSetUp := False;
+    FList := nil;
+    FRemoved := nil;
+    ShowFolders;
+    FSavedState := StateText;
+    Exit;
+  end;
   FSetUp := ReadDriveInfo(FDrives[ComboDrives.ItemIndex].Root, FInfo);
   EditDescription.Text := FInfo.Description;
   if FSetUp then
@@ -128,7 +171,6 @@ begin
     FList := nil;
   end;
   FRemoved := Copy(FInfo.Removed);
-  ButtonVerify.Enabled := FSetUp and FInfo.HasList;
   ShowFolders;
 
   ListHistory.Items.BeginUpdate;
@@ -149,7 +191,7 @@ begin
 end;
 
 { One row per folder: [x] D:\MUSIC  to  D-mirror\MUSIC }
-procedure TFormDrive.ShowFolders;
+procedure TFrameDrives.ShowFolders;
 var
   I, Sel: Integer;
   Item: TListItem;
@@ -178,7 +220,7 @@ begin
   UpdateButtons;
 end;
 
-procedure TFormDrive.ReadTicks;
+procedure TFrameDrives.ReadTicks;
 var
   I: Integer;
 begin
@@ -186,19 +228,31 @@ begin
     if I <= High(FList) then FList[I].Enabled := ListFolders.Items[I].Checked;
 end;
 
-procedure TFormDrive.UpdateButtons;
+procedure TFrameDrives.UpdateButtons;
+var
+  Edit: Boolean;
 begin
-  ButtonEditFolder.Enabled := ListFolders.ItemIndex >= 0;
-  ButtonRemoveFolder.Enabled := ListFolders.ItemIndex >= 0;
+  // not while copying: the run in progress uses the drive maps it read at the start
+  Edit := not FBusy and (ComboDrives.ItemIndex >= 0);
+  EditDescription.ReadOnly := not Edit;
+  ListFolders.Enabled := Edit;
+  ButtonAddFolder.Enabled := Edit;
+  ButtonStarting.Enabled := Edit;
+  ButtonEditFolder.Enabled := Edit and (ListFolders.ItemIndex >= 0);
+  ButtonRemoveFolder.Enabled := Edit and (ListFolders.ItemIndex >= 0);
+  ButtonApply.Enabled := Edit;
+  ButtonUndo.Enabled := Edit;
+  ButtonVerify.Enabled := Edit and FSetUp and FInfo.HasList;
+  ComboDrives.Enabled := Length(FDrives) > 0;
 end;
 
-procedure TFormDrive.ListFoldersSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
+procedure TFrameDrives.ListFoldersSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
 begin
   UpdateButtons;
 end;
 
 { Everything Save would write, as text - differs from FSavedState when there are unsaved edits }
-function TFormDrive.StateText: string;
+function TFrameDrives.StateText: string;
 var
   I: Integer;
 begin
@@ -209,7 +263,12 @@ begin
   for I := 0 to High(FRemoved) do Result := Result + FRemoved[I] + #2;
 end;
 
-procedure TFormDrive.AddFolder(const Path: string);
+function TFrameDrives.Modified: Boolean;
+begin
+  Result := (FLastIndex >= 0) and (StateText <> FSavedState);
+end;
+
+procedure TFrameDrives.AddFolder(const Path: string);
 var
   N, I: Integer;
 begin
@@ -223,7 +282,7 @@ begin
     if SameText(FRemoved[I], MirrorFolder(FList[N])) then Delete(FRemoved, I, 1);
 end;
 
-procedure TFormDrive.ButtonAddFolderClick(Sender: TObject);
+procedure TFrameDrives.ButtonAddFolderClick(Sender: TObject);
 var
   Path, Problem: string;
   I: Integer;
@@ -245,7 +304,7 @@ begin
   UpdateButtons;
 end;
 
-procedure TFormDrive.ButtonStartingClick(Sender: TObject);
+procedure TFrameDrives.ButtonStartingClick(Sender: TObject);
 var
   I, J, Added: Integer;
   Have: Boolean;
@@ -268,13 +327,13 @@ begin
   ShowFolders;
 end;
 
-procedure TFormDrive.ButtonEditFolderClick(Sender: TObject);
+procedure TFrameDrives.ButtonEditFolderClick(Sender: TObject);
 var
   I: Integer;
   Old: string;
 begin
   I := ListFolders.ItemIndex;
-  if I < 0 then Exit;
+  if (I < 0) or not ButtonEditFolder.Enabled then Exit;
   ReadTicks;
   Old := MirrorFolder(FList[I]);
   if not TFormSource.Execute(Self, FList, I) then Exit;
@@ -287,7 +346,7 @@ begin
   ShowFolders;
 end;
 
-procedure TFormDrive.ButtonRemoveFolderClick(Sender: TObject);
+procedure TFrameDrives.ButtonRemoveFolderClick(Sender: TObject);
 var
   I: Integer;
 begin
@@ -308,7 +367,7 @@ begin
   ShowFolders;
 end;
 
-procedure TFormDrive.ButtonVerifyClick(Sender: TObject);
+procedure TFrameDrives.ButtonVerifyClick(Sender: TObject);
 begin
   if not AskToSave then Exit;
   if MessageDlg('Verify ' + DriveTag + '?' + sLineBreak + sLineBreak +
@@ -317,11 +376,10 @@ begin
     'A large drive takes a while; you can cancel it.' + sLineBreak + sLineBreak +
     'Nothing is changed except the checksum lists - and the date of any bad file, so the next copy replaces it.',
     mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
-  FVerify := ComboDrives.ItemIndex;
-  ModalResult := mrOk;
+  if Assigned(FOnVerify) then FOnVerify(FDrives[ComboDrives.ItemIndex]);
 end;
 
-procedure TFormDrive.ComboDrivesChange(Sender: TObject);
+procedure TFrameDrives.ComboDrivesChange(Sender: TObject);
 var
   I: Integer;
 begin
@@ -334,38 +392,39 @@ begin
   ShowDrive;
 end;
 
-{ Unsaved edits: save them, drop them, or stay. True = go on. }
-function TFormDrive.AskToSave: Boolean;
+function TFrameDrives.AskToSave: Boolean;
 begin
   Result := True;
-  if StateText = FSavedState then Exit;
+  if not Modified then Exit;
   if not FSetUp then
     case MessageDlg(DriveTag + ' is not set up yet. Set it up now?', mtConfirmation, [mbYes, mbNo, mbCancel], 0) of
       mrYes: Result := Apply;
-      mrNo: ;
+      mrNo: ShowDrive;                           // drop the edits, so they don't come back later
     else
       Result := False;
     end
   else
     case MessageDlg('Save the changes for ' + DriveTag + '?', mtConfirmation, [mbYes, mbNo, mbCancel], 0) of
       mrYes: Result := Apply;
-      mrNo: ;
+      mrNo: ShowDrive;
     else
       Result := False;
     end;
 end;
 
-procedure TFormDrive.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
-begin
-  CanClose := AskToSave;
-end;
-
-procedure TFormDrive.ButtonApplyClick(Sender: TObject);
+procedure TFrameDrives.ButtonApplyClick(Sender: TObject);
 begin
   Apply;
 end;
 
-function TFormDrive.Apply: Boolean;
+procedure TFrameDrives.ButtonUndoClick(Sender: TObject);
+begin
+  if not Modified then Exit;
+  if MessageDlg('Undo the changes for ' + DriveTag + ' since it was last saved?', mtConfirmation, [mbYes, mbNo], 0) =
+    mrYes then ShowDrive;
+end;
+
+function TFrameDrives.Apply: Boolean;
 var
   D: TOfflineDrive;
   Plugged: TOfflineDriveArray;
@@ -379,12 +438,14 @@ begin
   if Trim(EditDescription.Text) = '' then
   begin
     MessageDlg('Type a few words about what this drive is for, e.g. "Music and pictures".', mtInformation, [mbOK], 0);
+    PageDrive.ActivePage := TabFolders;
     EditDescription.SetFocus;
     Exit;
   end;
   if Length(FList) = 0 then
   begin
     MessageDlg('Add at least one folder for this drive to back up.', mtInformation, [mbOK], 0);
+    PageDrive.ActivePage := TabFolders;
     Exit;
   end;
   // the drive must still be there with the same label
@@ -415,9 +476,9 @@ begin
     MessageDlg('Could not write ' + DriveMapName + ' to ' + DriveTag + '.', mtError, [mbOK], 0);
     Exit;
   end;
-  FChanged := True;
   ShowDrive;
   Result := True;
+  if Assigned(FOnChanged) then FOnChanged(Self);
 end;
 
 end.
