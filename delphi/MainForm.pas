@@ -28,7 +28,8 @@ type
     TabDrivesIn: TTabSheet;
     LabelDrives: TLabel;
     ListDrives: TListView;
-    TabProgress: TTabSheet;
+    SplitterProgress: TSplitter;
+    PanelProgress: TPanel;
     TabLog: TTabSheet;
     LabelStatus: TLabel;
     LabelEta: TLabel;
@@ -260,11 +261,11 @@ begin
   RefreshDrives(False);
 end;
 
-{ A copy, verify or check is starting: show its progress }
+{ A copy, verify or check is starting: show its progress, under the drives plugged in }
 procedure TFormMain.ShowProgressTab;
 begin
   if FSide.ItemIndex <> AREA_BACKUP then FSide.ItemIndex := AREA_BACKUP;
-  PageBackup.ActivePage := TabProgress;
+  PageBackup.ActivePage := TabDrivesIn;
 end;
 
 { The latest news, both on the Progress tab and in the status bar, where it shows whatever area is open }

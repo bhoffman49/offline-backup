@@ -109,7 +109,7 @@ object FormMain: TFormMain
         object ListDrives: TListView
           AlignWithMargins = True
           Left = 6
-          Height = 430
+          Height = 295
           Top = 29
           Width = 682
           Margins.Left = 6
@@ -139,54 +139,69 @@ object FormMain: TFormMain
           TabOrder = 0
           ViewStyle = vsReport
         end
-      end
-      object TabProgress: TTabSheet
-        Caption = 'Progress'
-        object LabelStatus: TLabel
-          Left = 12
-          Height = 15
-          Top = 14
-          Width = 670
-          Anchors = [akTop, akLeft, akRight]
-          AutoSize = False
-          Caption = 'Nothing running.'
-          Font.Style = [fsBold]
-          ParentFont = False
+        object SplitterProgress: TSplitter
+          Cursor = crVSplit
+          Left = 0
+          Height = 5
+          Top = 330
+          Width = 694
+          Align = alBottom
+          MinSize = 80
         end
-        object LabelEta: TLabel
-          Left = 12
-          Height = 15
-          Top = 42
-          Width = 670
-          Anchors = [akTop, akLeft, akRight]
-          AutoSize = False
-          Caption = ''
-        end
-        object LabelCounts: TLabel
-          Left = 12
-          Height = 15
-          Top = 62
-          Width = 670
-          Anchors = [akTop, akLeft, akRight]
-          AutoSize = False
-          Caption = ''
-        end
-        object LabelRate: TLabel
-          Left = 12
-          Height = 15
-          Top = 82
-          Width = 670
-          Anchors = [akTop, akLeft, akRight]
-          AutoSize = False
-          Caption = ''
-        end
-        object ProgressBar: TProgressBar
-          Left = 12
-          Height = 22
-          Top = 110
-          Width = 670
-          Anchors = [akTop, akLeft, akRight]
-          TabOrder = 0
+        object PanelProgress: TPanel
+          Left = 0
+          Height = 136
+          Top = 335
+          Width = 694
+          Align = alBottom
+          BevelOuter = bvNone
+          TabOrder = 1
+          object LabelStatus: TLabel
+            Left = 12
+            Height = 15
+            Top = 8
+            Width = 666
+            Anchors = [akTop, akLeft, akRight]
+            AutoSize = False
+            Caption = 'Nothing running.'
+            Font.Style = [fsBold]
+            ParentFont = False
+          end
+          object LabelEta: TLabel
+            Left = 12
+            Height = 15
+            Top = 32
+            Width = 666
+            Anchors = [akTop, akLeft, akRight]
+            AutoSize = False
+            Caption = ''
+          end
+          object LabelCounts: TLabel
+            Left = 12
+            Height = 15
+            Top = 52
+            Width = 666
+            Anchors = [akTop, akLeft, akRight]
+            AutoSize = False
+            Caption = ''
+          end
+          object LabelRate: TLabel
+            Left = 12
+            Height = 15
+            Top = 72
+            Width = 666
+            Anchors = [akTop, akLeft, akRight]
+            AutoSize = False
+            Caption = ''
+          end
+          object ProgressBar: TProgressBar
+            Left = 12
+            Height = 22
+            Top = 98
+            Width = 666
+            Anchors = [akTop, akLeft, akRight]
+            TabOrder = 0
+          end
         end
       end
       object TabLog: TTabSheet
