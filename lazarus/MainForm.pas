@@ -37,10 +37,16 @@ type
     PanelProgress: TPanel;
     TabLog: TTabSheet;
     LabelStatus: TLabel;
+    LabelFile: TLabel;
+    LabelFileBar: TLabel;
+    ProgressFile: TProgressBar;
+    LabelFilePct: TLabel;
+    LabelTotalBar: TLabel;
+    ProgressBar: TProgressBar;
+    LabelTotalPct: TLabel;
     LabelEta: TLabel;
     LabelCounts: TLabel;
     LabelRate: TLabel;
-    ProgressBar: TProgressBar;
     MemoLog: TMemo;
     TrayIcon: TTrayIcon;
     TrayMenu: TPopupMenu;
@@ -648,14 +654,36 @@ begin
     LabelEta.Caption := ProgressEtaLine(P);
     LabelCounts.Caption := ProgressCountsLine(P);
     LabelRate.Caption := ProgressRateLine(P);
+    LabelTotalPct.Caption := IntToStr(P.Percent) + '% of ' + FormatSize(P.BytesTotal);
   end;
   ProgressBar.Position := P.Percent;
+  // the file bar: copies only - a verify or MD5 check reads files without reporting each one
+  LabelFileBar.Visible := not P.Verifying and not P.Checking;
+  ProgressFile.Visible := LabelFileBar.Visible;
+  LabelFilePct.Visible := LabelFileBar.Visible;
+  if P.CurrentFile = '' then
+  begin
+    LabelFile.Caption := '';
+    LabelFilePct.Caption := '';
+    ProgressFile.Position := 0;
+  end
+  else
+  begin
+    LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
+    if P.CurrentFileSize > 0 then ProgressFile.Position := Trunc(100.0 * P.CurrentFileDone / P.CurrentFileSize)
+    else ProgressFile.Position := 100;
+    LabelFilePct.Caption := IntToStr(ProgressFile.Position) + '% of ' + FormatSize(P.CurrentFileSize);
+  end;
   if P.Speed < 0 then TrayIcon.Hint := 'Offline Backup - ' + IntToStr(P.Percent) + '%'
   else TrayIcon.Hint := 'Offline Backup - ' + IntToStr(P.Percent) + '% at ' + FormatSpeed(P.Speed);
 end;
 
 procedure TFormMain.ClearProgress;
 begin
+  LabelFile.Caption := '';
+  LabelFilePct.Caption := '';
+  LabelTotalPct.Caption := '';
+  ProgressFile.Position := 0;
   LabelEta.Caption := '';
   LabelCounts.Caption := '';
   LabelRate.Caption := '';

@@ -133,6 +133,11 @@ type
     SecondsLeft: Integer;        // -1 while not known
     Percent: Integer;
     Moved: Integer;              // files moved on the drive instead of copied
+    // the file robocopy is copying now ('' between files and outside a copy; small files may not show at all), its
+    // size and how much of it has been written so far (robocopy's write counter since the file was first seen, so an
+    // estimate, never above the size)
+    CurrentFile: string;
+    CurrentFileSize, CurrentFileDone: Int64;
     // a Verify run: FilesDone = files read, Errors = files that do not match their checksum (or could not be
     // read), Skipped = files that had no checksum yet and got one now
     Verifying: Boolean;
@@ -2085,6 +2090,7 @@ var
   Finished, HaveCur: Boolean;
   I, Cut, Done, Errs: Integer;
   Io: TIoCounters;
+  Writes, FileStart: UInt64;    // robocopy's write counter: now, and when the current file started
   SampleBytes: array[0..SpeedSamples - 1] of UInt64;
   SampleTime: array[0..SpeedSamples - 1] of TDateTime;
   Samples: Integer;
@@ -2098,6 +2104,7 @@ var
     Inc(FProgress.FilesDone);
     Inc(FProgress.FilesDoneBytes, CurSize);
     HaveCur := False;
+    if SameText(FProgress.CurrentFile, CurPath) then FProgress.CurrentFile := '';
   end;
 
 begin
@@ -2113,6 +2120,8 @@ begin
   Samples := 0;
   HaveCur := False;
   CurSize := 0;
+  Writes := 0;
+  FileStart := 0;
   Done := 0;
   Errs := 0;
   DoneBytes := 0;
@@ -2147,13 +2156,23 @@ begin
             Inc(FProgress.Errors);
             Inc(FProgress.ErrorBytes, CurSize);
             HaveCur := False;
+            FProgress.CurrentFile := '';
           end;
+        end;
+        // robocopy ends a file's line only when the file is done, so the line still open names the file being copied
+        // now - shown in the window, but counted only once its line is whole
+        if ParseRoboLine(Pending, CopyKeywords, Kw, Num, P) and not SameText(P, FProgress.CurrentFile) then
+        begin
+          FileStart := Writes;
+          FProgress.CurrentFile := P;
+          FProgress.CurrentFileSize := Num;
         end;
       end;
       if Finished and not FCancelled then FileFinished;
       if GetProcessIoCounters_(H, Io) then
       begin
         FProgress.BytesCopied := BytesBefore + Int64(Io.WriteTransferCount);
+        Writes := Io.WriteTransferCount;
         if Samples = SpeedSamples then
         begin
           Move(SampleBytes[1], SampleBytes[0], (SpeedSamples - 1) * SizeOf(UInt64));
@@ -2168,8 +2187,15 @@ begin
           FProgress.Speed := Round((SampleBytes[Samples - 1] - SampleBytes[0]) /
             ((SampleTime[Samples - 1] - SampleTime[0]) * 86400));
       end;
+      if FProgress.CurrentFile = '' then FProgress.CurrentFileDone := 0
+      else if Writes - FileStart > UInt64(FProgress.CurrentFileSize) then
+        FProgress.CurrentFileDone := FProgress.CurrentFileSize
+      else FProgress.CurrentFileDone := Int64(Writes - FileStart);
       Report;
     until Finished;
+    FProgress.CurrentFile := '';
+    FProgress.CurrentFileSize := 0;
+    FProgress.CurrentFileDone := 0;
     if not GetExitCodeProcess(H, Code) then Code := 16;
     Result := Integer(Code);
   finally

@@ -16,6 +16,7 @@ type
     Answer: Boolean;
     Asked: string;
     Last: TCopyProgress;      // the last progress report of a run
+    FileOverrun: Integer;     // reports whose current file was further along than its size
     SkipMissing: Boolean;
     MissingAsked: string;
     procedure Log(const Msg: string);
@@ -44,6 +45,7 @@ end;
 procedure THandlers.Progress(const P: TCopyProgress);
 begin
   Last := P;
+  if (P.CurrentFileDone < 0) or (P.CurrentFileDone > P.CurrentFileSize) then Inc(FileOverrun);
 end;
 
 procedure ShowLast;
@@ -1034,6 +1036,8 @@ begin
     IntToStr(H.Last.FilesDone) + ' of ' + IntToStr(H.Last.FilesTotal) + ')');
   Check((H.Last.Errors = 0) and (H.Last.Skipped = 0), 'no errors or skipped files');
   Check((H.Last.Percent = 100) and (H.Last.BytesCopied = H.Last.BytesTotal), 'progress ends at 100%');
+  Check((H.Last.CurrentFile = '') and (H.Last.CurrentFileSize = 0) and (H.FileOverrun = 0),
+    'current file: never past its size, cleared at the end');
   // 513 bytes can't have gone at MB/s - the final rate must be the real average, not robocopy's overhead
   Check((H.Last.Speed >= 0) and (H.Last.Speed < 100 * 1024), 'final rate is the real average (' +
     FormatSpeed(H.Last.Speed) + ')');
