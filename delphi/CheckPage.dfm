@@ -1,0 +1,172 @@
+object FrameCheck: TFrameCheck
+  Left = 0
+  Height = 517
+  Top = 0
+  Width = 768
+  TabOrder = 0
+  object PanelActions: TPanel
+    Left = 618
+    Height = 517
+    Top = 0
+    Width = 150
+    Align = alRight
+    BevelOuter = bvNone
+    TabOrder = 1
+    object ButtonOpen: TButton
+      Left = 8
+      Height = 30
+      Top = 34
+      Width = 130
+      Caption = 'Open MD5 file...'
+      OnClick = ButtonOpenClick
+      TabOrder = 0
+    end
+    object ButtonAgain: TButton
+      Left = 8
+      Height = 30
+      Top = 72
+      Width = 130
+      Caption = 'Check again'
+      Enabled = False
+      OnClick = ButtonAgainClick
+      TabOrder = 1
+    end
+  end
+  object PageCheck: TPageControl
+    AlignWithMargins = True
+    Left = 8
+    Height = 501
+    Top = 8
+    Width = 610
+    Margins.Left = 8
+    Margins.Top = 8
+    Margins.Right = 0
+    Margins.Bottom = 8
+    ActivePage = TabSummary
+    Align = alClient
+    TabOrder = 0
+    object TabSummary: TTabSheet
+      Caption = 'Summary'
+      object LabelFile: TLabel
+        Left = 12
+        Height = 15
+        Top = 12
+        Width = 578
+        Anchors = [akTop, akLeft, akRight]
+        AutoSize = False
+        Caption = 'No MD5 file checked yet.'
+        Font.Style = [fsBold]
+        ParentFont = False
+      end
+      object LabelResult: TLabel
+        Left = 12
+        Height = 60
+        Top = 36
+        Width = 578
+        Anchors = [akTop, akLeft, akRight]
+        AutoSize = False
+        Caption =
+          'Open MD5 file checks every file an .md5 file lists against its MD5 - for example the <letter>-mirror\<n' +
+          'ame>.md5 files on an OFFLINE drive, or a list made by ExactFile or md5sum. Nothing is changed.'
+        WordWrap = True
+      end
+      object ListSummary: TListView
+        Left = 12
+        Height = 130
+        Top = 100
+        Width = 578
+        Anchors = [akTop, akLeft, akRight]
+        Columns = <
+          item
+            Caption = 'Files'
+            Width = 300
+          end
+          item
+            Alignment = taRightJustify
+            Caption = 'Count'
+            Width = 110
+          end
+          item
+            Alignment = taRightJustify
+            Caption = 'Size'
+            Width = 110
+          end>
+        HideSelection = False
+        ReadOnly = True
+        RowSelect = True
+        TabOrder = 0
+        ViewStyle = vsReport
+        OnDblClick = ListSummaryDblClick
+        OnSelectItem = ListSummarySelectItem
+      end
+      object LabelPick: TLabel
+        Left = 12
+        Height = 15
+        Top = 238
+        Width = 578
+        Anchors = [akTop, akLeft, akRight]
+        AutoSize = False
+        Caption = 'Pick a line to choose which files the Files tab lists (double-click to go there).'
+        Visible = False
+      end
+    end
+    object TabFiles: TTabSheet
+      Caption = 'Files'
+      object LabelFiles: TLabel
+        AlignWithMargins = True
+        Left = 12
+        Height = 15
+        Top = 12
+        Width = 578
+        Margins.Left = 12
+        Margins.Top = 12
+        Margins.Right = 12
+        Margins.Bottom = 6
+        Align = alTop
+        Caption = 'No MD5 file checked yet.'
+        Font.Style = [fsBold]
+        ParentFont = False
+      end
+      object ListFiles: TListView
+        AlignWithMargins = True
+        Left = 12
+        Height = 426
+        Top = 33
+        Width = 578
+        Margins.Left = 12
+        Margins.Top = 0
+        Margins.Right = 12
+        Margins.Bottom = 12
+        Align = alClient
+        Columns = <
+          item
+            Caption = 'Result'
+            Width = 100
+          end
+          item
+            Caption = 'File'
+            Width = 370
+          end
+          item
+            Alignment = taRightJustify
+            Caption = 'Size'
+            Width = 90
+          end>
+        OwnerData = True
+        ReadOnly = True
+        RowSelect = True
+        TabOrder = 0
+        ViewStyle = vsReport
+        OnData = ListFilesData
+      end
+    end
+  end
+  object Md5Dialog: TOpenDialog
+    DefaultExt = 'md5'
+    Filter = 'MD5 files (*.md5)|*.md5|All files (*.*)|*.*'
+    Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing]
+    Title = 'Check the files listed in an MD5 file'
+    Left = 360
+    Top = 8
+  end
+end

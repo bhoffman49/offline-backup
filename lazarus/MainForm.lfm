@@ -209,14 +209,6 @@ object FormMain: TFormMain
     Left = 480
     Top = 40
   end
-  object Md5Dialog: TOpenDialog
-    DefaultExt = 'md5'
-    Filter = 'MD5 files (*.md5)|*.md5|All files (*.*)|*.*'
-    Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing]
-    Title = 'Check the files listed in an MD5 file'
-    Left = 360
-    Top = 40
-  end
   object TrayMenu: TPopupMenu
     Left = 420
     Top = 40

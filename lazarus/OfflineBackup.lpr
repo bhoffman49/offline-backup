@@ -6,7 +6,7 @@ program OfflineBackup;
 
 uses
   Interfaces, Forms, Windows, SysUtils,
-  MainForm, SettingsForm, SourceForm, DrivesPage, PreviewForm, CheckForm, OfflineEngine, DriveWatcher;
+  MainForm, SettingsForm, SourceForm, DrivesPage, PreviewForm, CheckPage, OfflineEngine, DriveWatcher;
 
 {$R *.res}
 

@@ -101,12 +101,12 @@
         <UnitName Value="PreviewForm"/>
       </Unit7>
       <Unit8>
-        <Filename Value="CheckForm.pas"/>
+        <Filename Value="CheckPage.pas"/>
         <IsPartOfProject Value="True"/>
-        <ComponentName Value="FormCheck"/>
+        <ComponentName Value="FrameCheck"/>
         <HasResources Value="True"/>
-        <ResourceBaseClass Value="Form"/>
-        <UnitName Value="CheckForm"/>
+        <ResourceBaseClass Value="Frame"/>
+        <UnitName Value="CheckPage"/>
       </Unit8>
     </Units>
   </ProjectOptions>

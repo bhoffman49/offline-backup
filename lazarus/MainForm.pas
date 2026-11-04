@@ -9,7 +9,7 @@ interface
 
 uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SideBar, SettingsForm, DrivesPage, PreviewForm, CheckForm;
+  OfflineEngine, DriveWatcher, SideBar, SettingsForm, DrivesPage, PreviewForm, CheckPage;
 
 const
   // the areas of the sidebar, in its order
@@ -35,7 +35,6 @@ type
     ListDrives: TListView;
     TabProgress: TTabSheet;
     TabLog: TTabSheet;
-    Md5Dialog: TOpenDialog;
     LabelStatus: TLabel;
     LabelEta: TLabel;
     LabelCounts: TLabel;
@@ -78,6 +77,7 @@ type
     FQuitting: Boolean;
     FSide: TSideBar;
     FDrivesPage: TFrameDrives;
+    FCheckPage: TFrameCheck;
     FReadyHint: string;               // what the status bar says while nothing else has happened
     procedure SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
     procedure SideChange(Sender: TObject);
@@ -87,7 +87,7 @@ type
     procedure SetStatus(const S: string);
     procedure OpenSettings;
     procedure OpenDrives;
-    procedure OpenCheck;
+    procedure CheckRequested(const Md5File: string);
     procedure DrivesChanged(Sender: TObject);
     procedure RefreshDrives(Announce: Boolean);
     procedure LogDriveState(const D: TOfflineDrive);
@@ -146,6 +146,11 @@ begin
   FDrivesPage.Align := alClient;
   FDrivesPage.OnVerify := DrivesVerify;
   FDrivesPage.OnChanged := DrivesPageChanged;
+  FCheckPage := TFrameCheck.Create(Self);
+  FCheckPage.Visible := False;
+  FCheckPage.Parent := Self;
+  FCheckPage.Align := alClient;
+  FCheckPage.OnCheck := CheckRequested;
   Application.OnQueryEndSession := QueryEndSession;
   FWatcher := TDriveWatcher.Create;
   FWatcher.OnChange := DrivesChanged;
@@ -220,17 +225,18 @@ begin
   if FSide.ItemIndex = AREA_DRIVES then Allow := FDrivesPage.AskToSave;
 end;
 
-{ The sidebar picked another area. Until they are pages of their own, Check and Settings open their windows and the
-  sidebar goes back to Backup. }
+{ The sidebar picked another area. Until it is a page of its own, Settings opens its window and the sidebar goes back
+  to Backup. }
 procedure TFormMain.SideChange(Sender: TObject);
 begin
   PanelBackup.Visible := FSide.ItemIndex = AREA_BACKUP;
   FDrivesPage.Visible := FSide.ItemIndex = AREA_DRIVES;
-  case FSide.ItemIndex of
-    AREA_CHECK: OpenCheck;
-    AREA_SETTINGS: OpenSettings;
+  FCheckPage.Visible := FSide.ItemIndex = AREA_CHECK;
+  if FSide.ItemIndex = AREA_SETTINGS then
+  begin
+    OpenSettings;
+    FSide.ItemIndex := AREA_BACKUP;
   end;
-  if FSide.ItemIndex in [AREA_CHECK, AREA_SETTINGS] then FSide.ItemIndex := AREA_BACKUP;
 end;
 
 procedure TFormMain.DrivesVerify(const Drive: TOfflineDrive);
@@ -411,6 +417,7 @@ begin
   // not while copying: the run in progress keeps the settings it started with
   MenuSettings.Enabled := FThread = nil;
   FDrivesPage.SetBusy(FThread <> nil);
+  FCheckPage.SetBusy(FThread <> nil);
   MenuCheck.Enabled := FThread = nil;
   // Dismount only shows when a VeraCrypt OFFLINE volume is mounted - everyone else never sees it
   Vera := 0;
@@ -516,7 +523,8 @@ end;
 procedure TFormMain.MenuCheckClick(Sender: TObject);
 begin
   ShowWindow;
-  OpenCheck;
+  FSide.ItemIndex := AREA_CHECK;
+  if FSide.ItemIndex = AREA_CHECK then FCheckPage.OpenFile;    // not if the Drives page kept its unsaved edits
 end;
 
 procedure TFormMain.OpenSettings;
@@ -607,17 +615,16 @@ begin
   if Problems <> '' then MessageDlg(Problems, mtWarning, [mbOK], 0);
 end;
 
-procedure TFormMain.OpenCheck;
+{ Open MD5 file or Check again on the MD5 check page: the progress shows under Backup, the result back on the page }
+procedure TFormMain.CheckRequested(const Md5File: string);
 begin
   if Assigned(FThread) then Exit;
-  ShowWindow;
-  if not Md5Dialog.Execute then Exit;
   FQueue := nil;
   ProgressBar.Position := 0;
   ClearProgress;
   ShowProgressTab;
-  AddLog('checking ' + Md5Dialog.FileName);
-  StartThread(TOfflineCopyThread.CreateCheck(FSettings, Md5Dialog.FileName));
+  AddLog('checking ' + Md5File);
+  StartThread(TOfflineCopyThread.CreateCheck(FSettings, Md5File));
 end;
 
 procedure TFormMain.CopyLog(const Msg: UnicodeString);
@@ -761,7 +768,7 @@ begin
   begin
     if T.CopyResult = crOk then SetStatus(ExtractFileName(T.CheckFile) + ': all files match')
     else if T.CopyResult = crCancelled then SetStatus(ExtractFileName(T.CheckFile) + ': check cancelled')
-    else SetStatus(ExtractFileName(T.CheckFile) + ': problems found - see the list');
+    else SetStatus(ExtractFileName(T.CheckFile) + ': problems found - see MD5 check');
   end
   else if T.Verifying then
   begin
@@ -786,7 +793,8 @@ begin
     TrayIcon.Hint := 'Offline Backup';
     UpdateButtons;
     ShowWindow;
-    TFormCheck.Execute(Self, T.CheckFile, T.Engine.CheckItems, T.CopyResult);
+    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult);
+    FSide.ItemIndex := AREA_CHECK;
     Exit;
   end;
   if FQuitting then Close else StartNext;

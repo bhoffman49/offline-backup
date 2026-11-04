@@ -11,7 +11,7 @@ uses
   SourceForm in 'SourceForm.pas' {FormSource},
   DrivesPage in 'DrivesPage.pas' {FrameDrives: TFrame},
   PreviewForm in 'PreviewForm.pas' {FormPreview},
-  CheckForm in 'CheckForm.pas' {FormCheck},
+  CheckPage in 'CheckPage.pas' {FrameCheck: TFrame},
   OfflineEngine in '..\common\OfflineEngine.pas',
   DriveWatcher in '..\common\DriveWatcher.pas';
 
