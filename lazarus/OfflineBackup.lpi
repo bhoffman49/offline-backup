@@ -16,6 +16,13 @@
         <DpiAware Value="True/PM_V2"/>
       </XPManifest>
       <Icon Value="0"/>
+      <Resources Count="5">
+        <Resource_0 FileName="..\common\icons\backup.ico" Type="RCDATA" ResourceName="SIDE_BACKUP"/>
+        <Resource_1 FileName="..\common\icons\drives.ico" Type="RCDATA" ResourceName="SIDE_DRIVES"/>
+        <Resource_2 FileName="..\common\icons\check.ico" Type="RCDATA" ResourceName="SIDE_CHECK"/>
+        <Resource_3 FileName="..\common\icons\settings.ico" Type="RCDATA" ResourceName="SIDE_SETTINGS"/>
+        <Resource_4 FileName="..\common\icons\restore.ico" Type="RCDATA" ResourceName="SIDE_RESTORE"/>
+      </Resources>
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>

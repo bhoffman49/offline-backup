@@ -1,6 +1,13 @@
 MAINICON ICON "..\\common\\OfflineBackup.ico"
 1 24 "OfflineBackup.manifest"
 
+// the main window's sidebar icons, drawn by tools\make-sidebar-icons.py (loaded by common\SideBar.pas)
+SIDE_BACKUP RCDATA "..\\common\\icons\\backup.ico"
+SIDE_DRIVES RCDATA "..\\common\\icons\\drives.ico"
+SIDE_CHECK RCDATA "..\\common\\icons\\check.ico"
+SIDE_SETTINGS RCDATA "..\\common\\icons\\settings.ico"
+SIDE_RESTORE RCDATA "..\\common\\icons\\restore.ico"
+
 // keep in step with AppVersion in ..\common\OfflineEngine.pas
 1 VERSIONINFO
 FILEVERSION 0,9,1,0
