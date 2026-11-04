@@ -7,7 +7,7 @@ uses
   System.SysUtils,
   Vcl.Forms,
   MainForm in 'MainForm.pas' {FormMain},
-  SettingsForm in 'SettingsForm.pas' {FormSettings},
+  SettingsPage in 'SettingsPage.pas' {FrameSettings: TFrame},
   SourceForm in 'SourceForm.pas' {FormSource},
   DrivesPage in 'DrivesPage.pas' {FrameDrives: TFrame},
   PreviewForm in 'PreviewForm.pas' {FormPreview},

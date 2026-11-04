@@ -9,7 +9,7 @@ interface
 
 uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SideBar, SettingsForm, DrivesPage, PreviewForm, CheckPage;
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage;
 
 const
   // the areas of the sidebar, in its order
@@ -78,6 +78,7 @@ type
     FSide: TSideBar;
     FDrivesPage: TFrameDrives;
     FCheckPage: TFrameCheck;
+    FSettingsPage: TFrameSettings;
     FReadyHint: string;               // what the status bar says while nothing else has happened
     procedure SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
     procedure SideChange(Sender: TObject);
@@ -86,6 +87,7 @@ type
     procedure ShowProgressTab;
     procedure SetStatus(const S: string);
     procedure OpenSettings;
+    procedure SettingsSaved(const Settings: TBackupSettings);
     procedure OpenDrives;
     procedure CheckRequested(const Md5File: string);
     procedure DrivesChanged(Sender: TObject);
@@ -151,6 +153,12 @@ begin
   FCheckPage.Parent := Self;
   FCheckPage.Align := alClient;
   FCheckPage.OnCheck := CheckRequested;
+  FSettingsPage := TFrameSettings.Create(Self);
+  FSettingsPage.Visible := False;
+  FSettingsPage.Parent := Self;
+  FSettingsPage.Align := alClient;
+  FSettingsPage.Load(FSettings);
+  FSettingsPage.OnSave := SettingsSaved;
   Application.OnQueryEndSession := QueryEndSession;
   FWatcher := TDriveWatcher.Create;
   FWatcher.OnChange := DrivesChanged;
@@ -210,10 +218,10 @@ begin
     MessageDlg('A copy is running. Cancel it first, then exit.', mtInformation, [mbOK], 0);
     Exit;
   end;
-  if FDrivesPage.Modified then
+  if FDrivesPage.Modified or FSettingsPage.Modified then
   begin
     ShowWindow;
-    if not FDrivesPage.AskToSave then Exit;
+    if not FDrivesPage.AskToSave or not FSettingsPage.AskToSave then Exit;
   end;
   FQuitting := True;
   Close;
@@ -222,21 +230,17 @@ end;
 { Leaving an area with unsaved changes: save them, drop them, or stay }
 procedure TFormMain.SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
 begin
-  if FSide.ItemIndex = AREA_DRIVES then Allow := FDrivesPage.AskToSave;
+  if FSide.ItemIndex = AREA_DRIVES then Allow := FDrivesPage.AskToSave
+  else if FSide.ItemIndex = AREA_SETTINGS then Allow := FSettingsPage.AskToSave;
 end;
 
-{ The sidebar picked another area. Until it is a page of its own, Settings opens its window and the sidebar goes back
-  to Backup. }
+{ The sidebar picked another area: show its page }
 procedure TFormMain.SideChange(Sender: TObject);
 begin
   PanelBackup.Visible := FSide.ItemIndex = AREA_BACKUP;
   FDrivesPage.Visible := FSide.ItemIndex = AREA_DRIVES;
   FCheckPage.Visible := FSide.ItemIndex = AREA_CHECK;
-  if FSide.ItemIndex = AREA_SETTINGS then
-  begin
-    OpenSettings;
-    FSide.ItemIndex := AREA_BACKUP;
-  end;
+  FSettingsPage.Visible := FSide.ItemIndex = AREA_SETTINGS;
 end;
 
 procedure TFormMain.DrivesVerify(const Drive: TOfflineDrive);
@@ -349,8 +353,8 @@ begin
     // only when the window is not on screen (or about to be, at a start with /show) - otherwise it is noise
     if not Visible and not (FStarting and Application.ShowMainForm) then TrayIcon.ShowBalloonHint;
     ShowWindow;
-    // not away from unsaved changes on the Drives page
-    if (FThread = nil) and not FDrivesPage.Modified then
+    // not away from unsaved changes on the Drives or Settings page
+    if (FThread = nil) and not FDrivesPage.Modified and not FSettingsPage.Modified then
     begin
       if FSide.ItemIndex <> AREA_BACKUP then FSide.ItemIndex := AREA_BACKUP;
       PageBackup.ActivePage := TabDrivesIn;
@@ -415,9 +419,9 @@ begin
   MenuStart.Enabled := ButtonStart.Enabled;
   ButtonCancel.Enabled := FThread <> nil;
   // not while copying: the run in progress keeps the settings it started with
-  MenuSettings.Enabled := FThread = nil;
   FDrivesPage.SetBusy(FThread <> nil);
   FCheckPage.SetBusy(FThread <> nil);
+  FSettingsPage.SetBusy(FThread <> nil);
   MenuCheck.Enabled := FThread = nil;
   // Dismount only shows when a VeraCrypt OFFLINE volume is mounted - everyone else never sees it
   Vera := 0;
@@ -528,14 +532,14 @@ begin
 end;
 
 procedure TFormMain.OpenSettings;
-var
-  S: TBackupSettings;
 begin
-  if Assigned(FThread) then Exit;
-  ShowWindow;
-  S := FSettings;
-  if not TFormSettings.Execute(Self, S) then Exit;
-  FSettings := S;
+  FSide.ItemIndex := AREA_SETTINGS;
+end;
+
+{ Save on the Settings page }
+procedure TFormMain.SettingsSaved(const Settings: TBackupSettings);
+begin
+  FSettings := Settings;
   FDrivesPage.SetDrives(FDrives, FSettings);    // Add starting folders uses the new ones
   if SaveSettings(SettingsFileName, FSettings) then AddLog('settings saved to ' + SettingsFileName)
   else MessageDlg('Could not save the settings to ' + SettingsFileName + '. They are used until the app is closed.',
@@ -677,6 +681,7 @@ begin
   begin
     FSettings.PreviewAlways := Always;
     SaveSettings(SettingsFileName, FSettings);
+    if not FSettingsPage.Modified then FSettingsPage.Load(FSettings);   // the tick on the page too
     if Always then AddLog('the preview now shows before every copy')
     else AddLog('the preview now shows only when files would be deleted or moved (change it back in Settings)');
   end;
