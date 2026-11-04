@@ -6,11 +6,11 @@ them. Each drive knows which folders it backs up. Before anything changes on a d
 that would be overwritten or deleted are kept in `_versions` first; moved files are moved on the drive instead
 of copied again; and CRC32 / MD5 checksums let you verify a drive at any time, even on another PC.
 
-Version **0.9.1** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
+Version **0.9.2** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
 
 ## Download and install
 
-1. Download `OfflineBackup-0.9.1-win64.zip` from the Releases page and unzip it to a folder you can write to
+1. Download `OfflineBackup-0.9.2-win64.zip` from the Releases page and unzip it to a folder you can write to
    (for example `Documents\OfflineBackup`).
 2. Start `OfflineBackup.exe` - it sits in the tray (add `/show` to open its window too).
    Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.
@@ -230,9 +230,6 @@ ticked folder is missing at copy time, the app asks: skip it (the rest is copied
 say INCOMPLETE) or stop that drive's copy.
 
 ## Encrypted backup drives with VeraCrypt
-
-*Coming in 0.9.2 - the `[VeraCrypt]` mark, the Dismount button and the dismount setting are not in the 0.9.1
-download yet. VeraCrypt drives already work with 0.9.1; dismount them in VeraCrypt before unplugging.*
 
 A backup drive left in a drawer or a car can be lost or stolen. [VeraCrypt](https://veracrypt.fr) (free, open
 source) encrypts it, and Offline Backup works with it: VeraCrypt stays a separate program that opens the drive

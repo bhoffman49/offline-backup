@@ -27,8 +27,8 @@
     <VersionInfo>
       <UseVersionInfo Value="True"/>
       <MinorVersionNr Value="9"/>
-      <RevisionNr Value="1"/>
-      <StringTable FileDescription="Offline Backup - copies chosen folders to OFFLINE-x USB drives" LegalCopyright="Copyright (c) 2026 bhoffman - MIT License" ProductName="Offline Backup" ProductVersion="0.9.1"/>
+      <RevisionNr Value="2"/>
+      <StringTable FileDescription="Offline Backup - copies chosen folders to OFFLINE-x USB drives" LegalCopyright="Copyright (c) 2026 bhoffman - MIT License" ProductName="Offline Backup" ProductVersion="0.9.2"/>
     </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="default" Default="True"/>

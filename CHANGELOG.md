@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.2 - not released yet
+## 0.9.2 - 2026-11-03
 
 - VeraCrypt: OFFLINE drives that are mounted VeraCrypt volumes are marked `[VeraCrypt]`, and a **Dismount**
   button (also on the tray menu) asks VeraCrypt to dismount them - never forced, so open files are reported
