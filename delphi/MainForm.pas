@@ -484,6 +484,7 @@ var
 begin
   if Length(FQueue) = 0 then
   begin
+    RefreshDrives(False);             // the drive list's Last copy, from the drive maps the run updated
     UpdateButtons;
     ShowRunSummary;
     Exit;

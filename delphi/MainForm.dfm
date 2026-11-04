@@ -120,19 +120,19 @@ object FormMain: TFormMain
           Columns = <
             item
               Caption = 'Drive'
-              Width = 44
+              Width = 40
             end
             item
               Caption = 'Name'
-              Width = 150
+              Width = 140
             end
             item
               Caption = 'What it is for'
-              Width = 200
+              Width = 180
             end
             item
-              AutoSize = True
               Caption = 'Last copy'
+              Width = 215
             end>
           ReadOnly = True
           RowSelect = True
