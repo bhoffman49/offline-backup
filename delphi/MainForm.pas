@@ -301,6 +301,7 @@ begin
   Old := FDrives;
   FDrives := FindOfflineDrives;
   FDrivesPage.SetDrives(FDrives, FSettings);
+  FCheckPage.SetDrives(FDrives);
   Added := '';
   ListDrives.Items.BeginUpdate;
   try

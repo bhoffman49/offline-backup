@@ -39,12 +39,15 @@ type
     FShown: array of Integer;     // indexes into FItems for the rows of ListFiles
     FMd5File: string;             // the file checked last, for Check again
     FBusy: Boolean;
+    FDrives: TOfflineDriveArray;  // OFFLINE drives plugged in, for where Open MD5 file starts
     FOnCheck: TCheckFileEvent;
+    function Md5Folder: string;
     procedure ShowStatus(Row: Integer);
     procedure UpdateButtons;
   public
     procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult);
     procedure SetBusy(Busy: Boolean);
+    procedure SetDrives(const Drives: TOfflineDriveArray);
     // asks for an .md5 file and checks it
     procedure OpenFile;
     property OnCheck: TCheckFileEvent read FOnCheck write FOnCheck;      // check this file now
@@ -135,9 +138,46 @@ begin
   ButtonAgain.Enabled := not FBusy and (FMd5File <> '');
 end;
 
+procedure TFrameCheck.SetDrives(const Drives: TOfflineDriveArray);
+begin
+  FDrives := Copy(Drives);
+end;
+
+{ Where Open MD5 file starts: the first OFFLINE drive that has been set up - in its mirror folder, where the .md5 files
+  are, if it has just one (C-mirror), else at its root. '' with no such drive, so the dialog opens where it did last. }
+function TFrameCheck.Md5Folder: string;
+var
+  I, Found: Integer;
+  SR: TSearchRec;
+begin
+  Result := '';
+  for I := 0 to High(FDrives) do
+    if FDrives[I].SetUp then
+    begin
+      Result := FDrives[I].Root;
+      Break;
+    end;
+  if Result = '' then Exit;
+  Found := 0;
+  if FindFirst(Result + '*-mirror', faDirectory, SR) = 0 then
+  begin
+    repeat
+      if (SR.Attr and faDirectory) <> 0 then
+      begin
+        Inc(Found);
+        if Found = 1 then Result := Result + SR.Name
+        else Result := ExtractFileDrive(Result) + '';
+      end;
+    until (Found > 1) or (FindNext(SR) <> 0);
+    FindClose(SR);
+  end;
+end;
+
 procedure TFrameCheck.OpenFile;
 begin
-  if FBusy or not Md5Dialog.Execute then Exit;
+  if FBusy then Exit;
+  Md5Dialog.InitialDir := Md5Folder;
+  if not Md5Dialog.Execute then Exit;
   if Assigned(FOnCheck) then FOnCheck(Md5Dialog.FileName);
 end;
 
