@@ -138,6 +138,13 @@ type
     // estimate, never above the size)
     CurrentFile: string;
     CurrentFileSize, CurrentFileDone: Int64;
+    // recording checksums after a folder's copy: the copied files are read again from the source. Hashing is True
+    // meanwhile; files and bytes read so far of the folder's copied files, the read rate and the time left
+    Hashing: Boolean;
+    HashFiles, HashFilesDone: Integer;
+    HashBytes, HashBytesDone: Int64;
+    HashSpeed: Int64;            // bytes per second, -1 while not known
+    HashSecondsLeft: Integer;    // -1 while not known
     // a Verify run: FilesDone = files read, Errors = files that do not match their checksum (or could not be
     // read), Skipped = files that had no checksum yet and got one now
     Verifying: Boolean;
@@ -182,6 +189,7 @@ type
     FList: TBackupSourceArray;   // the folders this drive backs up (from its drive map)
     FCopied: TPathList;          // source paths robocopy copied in the folder just done (for the checksums)
     FLastReport: DWORD;
+    FHashStarted: TDateTime;
     FHistorySaved: Boolean;
     FVeraCrypt: Boolean;
     FDismounted: Boolean;
@@ -202,6 +210,8 @@ type
     procedure FindMoves(const Src: TBackupSource; Plan: TCopyPlan);
     procedure DoMoves(const Src: TBackupSource; Plan: TCopyPlan);
     procedure CountBytes(N: Int64);
+    procedure HashBytes(N: Int64);
+    procedure HashReport(Always: Boolean);
   public
     AllowFolderTarget: Boolean;  // tests only: lets Drive be a plain folder instead of an OFFLINE-x drive
     AssumeYes: Boolean;          // skip the brake question (like the script's -Yes)
@@ -435,6 +445,12 @@ end;
 
 function ProgressEtaLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then
+  begin
+    if P.HashSecondsLeft < 0 then Result := 'Checksums: time left - working it out'
+    else Result := 'Checksums: about ' + FormatDuration(P.HashSecondsLeft) + ' left';
+    Exit(Result + '  (' + FormatSize(P.HashBytesDone) + ' of ' + FormatSize(P.HashBytes) + ' read again from the source)');
+  end;
   if P.SecondsLeft < 0 then Result := 'Estimated time left: working it out'
   else Result := 'Estimated time left: ' + FormatDuration(P.SecondsLeft);
   Result := Result + '  (' + FormatSize(P.BytesCopied) + ' of ' + FormatSize(P.BytesTotal) + ' copied)';
@@ -442,6 +458,9 @@ end;
 
 function ProgressCountsLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then
+    Exit(Format('Files read: %s of %s     (copying is done - this records each file''s CRC32 and MD5)',
+      [FormatFloat('#,##0', P.HashFilesDone), FormatFloat('#,##0', P.HashFiles)]));
   if P.Checking then
     Exit(Format('Checked: %d (%s)     Bad: %d     Missing: %d     Tot: %d (%s)',
       [P.FilesDone, FormatSize(P.FilesDoneBytes), P.Errors, P.Skipped, P.FilesTotal, FormatSize(P.BytesTotal)]));
@@ -455,6 +474,7 @@ end;
 
 function ProgressRateLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then Exit('Reading rate: ' + FormatSpeed(P.HashSpeed));
   Result := 'Transfer rate: ' + FormatSpeed(P.Speed) + '  (' + FormatDuration(P.Elapsed) + ')';
 end;
 
@@ -2473,26 +2493,58 @@ var
   SSize, STime, DSize, DTime: Int64;
   I, J, N: Integer;
   Gone: Boolean;
+  Sizes: array of Int64;        // of the copied files, for the progress
 begin
   if (Length(FCopied) = 0) and (Length(Plan.DeleteFiles) = 0) and (Length(Plan.DeleteDirs) = 0) then Exit;
   ListFile := FDrive + ChecksumDir + '\' + Folder + '.crc';
   SrcRoot := NoTrailingSlash(Src) + '\';
   DestRoot := NoTrailingSlash(Dest) + '\';
   FProgress.Status := 'Recording checksums for ' + FProgress.Folder + ' (' + IntToStr(Length(FCopied)) + ' files)';
-  Report;
-  Added := nil;
+  // how much there is to read, so the window can show how far it is and how long it will take
+  FProgress.Hashing := True;
+  FProgress.HashFiles := 0;
+  FProgress.HashFilesDone := 0;
+  FProgress.HashBytes := 0;
+  FProgress.HashBytesDone := 0;
+  FProgress.HashSpeed := -1;
+  FProgress.HashSecondsLeft := -1;
+  SetLength(Sizes, Length(FCopied));
   for I := 0 to High(FCopied) do
   begin
-    if FCancelled then Exit;
+    Sizes[I] := 0;
     if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
-    Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
-    if FileSums(FCopied[I], False, Crc, Md5, nil, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
-       FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
-    begin
-      SetLength(Added, Length(Added) + 1);
-      Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);
-    end;
+    if FileStamp(FCopied[I], SSize, STime) then Sizes[I] := SSize;
+    Inc(FProgress.HashFiles);
+    Inc(FProgress.HashBytes, Sizes[I]);
   end;
+  FHashStarted := Now;
+  HashReport(True);
+  Added := nil;
+  try
+    for I := 0 to High(FCopied) do
+    begin
+      if FCancelled then Exit;
+      if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
+      Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
+      FProgress.CurrentFile := FCopied[I];
+      FProgress.CurrentFileSize := Sizes[I];
+      FProgress.CurrentFileDone := 0;
+      if FileSums(FCopied[I], False, Crc, Md5, HashBytes, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
+         FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
+      begin
+        SetLength(Added, Length(Added) + 1);
+        Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);
+      end;
+      Inc(FProgress.HashFilesDone);
+      HashReport(False);
+    end;
+  finally
+    FProgress.Hashing := False;
+    FProgress.CurrentFile := '';
+    FProgress.CurrentFileSize := 0;
+    FProgress.CurrentFileDone := 0;
+  end;
+  Report;
   SortCrcList(Added, 0, High(Added));
   // files robocopy deleted (and whole deleted folders) - their paths are on the drive
   DelFiles := nil;
@@ -2543,6 +2595,34 @@ function Seconds(Start: TDateTime): Double;
 begin
   Result := (Now - Start) * 86400;
   if Result < 1 then Result := 1;
+end;
+
+{ Bytes read for the checksums (FileSums' progress) }
+procedure TOfflineCopy.HashBytes(N: Int64);
+begin
+  Inc(FProgress.HashBytesDone, N);
+  Inc(FProgress.CurrentFileDone, N);
+  if FProgress.CurrentFileDone > FProgress.CurrentFileSize then FProgress.CurrentFileDone := FProgress.CurrentFileSize;
+  HashReport(False);
+end;
+
+{ The checksums' rate and time left, passed on at most twice a second (Always: now) }
+procedure TOfflineCopy.HashReport(Always: Boolean);
+var
+  T: DWORD;
+  Secs: Double;
+begin
+  T := GetTickCount;
+  if not Always and (T - FLastReport < 500) then Exit;
+  FLastReport := T;
+  Secs := (Now - FHashStarted) * 86400;
+  if (Secs >= 2) and (FProgress.HashBytesDone > 0) then
+  begin
+    FProgress.HashSpeed := Round(FProgress.HashBytesDone / Secs);
+    FProgress.HashSecondsLeft := Round((FProgress.HashBytes - FProgress.HashBytesDone) / (FProgress.HashBytesDone / Secs));
+    if FProgress.HashSecondsLeft < 0 then FProgress.HashSecondsLeft := 0;
+  end;
+  Report;
 end;
 
 procedure TOfflineCopy.CountBytes(N: Int64);

@@ -17,6 +17,7 @@ type
     Asked: string;
     Last: TCopyProgress;      // the last progress report of a run
     FileOverrun: Integer;     // reports whose current file was further along than its size
+    LastHash: TCopyProgress;  // the last report while checksums were being recorded (HashFiles = 0: none)
     SkipMissing: Boolean;
     MissingAsked: string;
     procedure Log(const Msg: string);
@@ -46,6 +47,7 @@ procedure THandlers.Progress(const P: TCopyProgress);
 begin
   Last := P;
   if (P.CurrentFileDone < 0) or (P.CurrentFileDone > P.CurrentFileSize) then Inc(FileOverrun);
+  if P.Hashing then LastHash := P;
 end;
 
 procedure ShowLast;
@@ -1038,6 +1040,9 @@ begin
   Check((H.Last.Percent = 100) and (H.Last.BytesCopied = H.Last.BytesTotal), 'progress ends at 100%');
   Check((H.Last.CurrentFile = '') and (H.Last.CurrentFileSize = 0) and (H.FileOverrun = 0),
     'current file: never past its size, cleared at the end');
+  Check((H.LastHash.HashFiles > 0) and (H.LastHash.HashBytes > 0) and
+    (H.LastHash.HashBytesDone <= H.LastHash.HashBytes) and not H.Last.Hashing,
+    'recording checksums reports its progress, and is over at the end (' + IntToStr(H.LastHash.HashFiles) + ' files)');
   // 513 bytes can't have gone at MB/s - the final rate must be the real average, not robocopy's overhead
   Check((H.Last.Speed >= 0) and (H.Last.Speed < 100 * 1024), 'final rate is the real average (' +
     FormatSpeed(H.Last.Speed) + ')');

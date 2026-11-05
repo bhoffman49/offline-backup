@@ -180,15 +180,15 @@ object FormMain: TFormMain
             Left = 12
             Height = 15
             Top = 54
-            Width = 48
+            Width = 72
             AutoSize = False
             Caption = 'File:'
           end
           object ProgressFile: TProgressBar
-            Left = 62
+            Left = 88
             Height = 18
             Top = 52
-            Width = 476
+            Width = 450
             Anchors = [akTop, akLeft, akRight]
             TabOrder = 0
           end
@@ -205,15 +205,15 @@ object FormMain: TFormMain
             Left = 12
             Height = 15
             Top = 80
-            Width = 48
+            Width = 72
             AutoSize = False
             Caption = 'Total:'
           end
           object ProgressBar: TProgressBar
-            Left = 62
+            Left = 88
             Height = 18
             Top = 78
-            Width = 476
+            Width = 450
             Anchors = [akTop, akLeft, akRight]
             TabOrder = 1
           end

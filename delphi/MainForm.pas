@@ -102,6 +102,7 @@ type
     procedure StartThread(T: TOfflineCopyThread);
     procedure UpdateButtons;
     procedure ShowWindow;
+    procedure FlashTaskbar;
     procedure AddLog(const Msg: string);
     procedure WMQueryEndSession(var Msg: TWMQueryEndSession); message WM_QUERYENDSESSION;
     procedure CopyLog(const Msg: string);
@@ -200,6 +201,18 @@ begin
   BringToFront;
 end;
 
+{ Flashes the window's taskbar button until the window is looked at (does nothing while it is in front) }
+procedure TFormMain.FlashTaskbar;
+var
+  FI: TFlashWInfo;
+begin
+  FillChar(FI, SizeOf(FI), 0);
+  FI.cbSize := SizeOf(FI);
+  FI.hwnd := Handle;
+  FI.dwFlags := FLASHW_TRAY or FLASHW_TIMERNOFG;
+  FlashWindowEx(FI);
+end;
+
 procedure TFormMain.TrayIconClick(Sender: TObject);
 begin
   ShowWindow;
@@ -296,10 +309,11 @@ var
   Old: TOfflineDriveArray;
   I, J: Integer;
   Known: Boolean;
-  Added, Hint: string;
+  Added, Gone, Hint, Said: string;
 begin
   Old := FDrives;
   FDrives := FindOfflineDrives;
+  Gone := '';
   FDrivesPage.SetDrives(FDrives, FSettings);
   FCheckPage.SetDrives(FDrives);
   Added := '';
@@ -332,6 +346,17 @@ begin
       Added := Added + FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + ')';
     end;
   end;
+  for J := 0 to High(Old) do
+  begin
+    Known := False;
+    for I := 0 to High(FDrives) do
+      if (Old[J].Root = FDrives[I].Root) and (Old[J].VolLabel = FDrives[I].VolLabel) then Known := True;
+    if not Known then
+    begin
+      if Gone <> '' then Gone := Gone + ', ';
+      Gone := Gone + Old[J].VolLabel + ' (' + Copy(Old[J].Root, 1, 2) + ')';
+    end;
+  end;
   if Length(FDrives) = 0 then
     LabelDrives.Caption := 'No OFFLINE-x drive plugged in. Plug in a backup drive whose name (volume label) is ' +
       'OFFLINE-A, OFFLINE-B, ... and it shows up here.'
@@ -349,6 +374,12 @@ begin
     StatusBar.Panels[0].Text := Hint;
   FReadyHint := Hint;
   UpdateButtons;
+  // a drive that went away (unplugged, or dismounted in VeraCrypt) - said in the window, not in a balloon
+  if Announce and (Gone <> '') then
+  begin
+    AddLog('gone: ' + Gone + ' (unplugged or dismounted)');
+    if FThread = nil then StatusBar.Panels[0].Text := Gone + ' is gone - unplugged or dismounted.';
+  end;
   if Announce and (Added <> '') then
   begin
     AddLog('plugged in: ' + Added);
@@ -361,12 +392,23 @@ begin
     end;
     TrayIcon.BalloonTitle := 'Offline Backup';
     TrayIcon.BalloonHint := Added + ' plugged in. Open the window to start the copy.';
+    Said := Added + ' plugged in.';
     for I := 0 to High(FDrives) do
       if not FDrives[I].SetUp and (Pos(FDrives[I].VolLabel, Added) > 0) then
+      begin
         TrayIcon.BalloonHint := Added + ' plugged in. New drive - set it up under Drives before copying.';
+        Said := Added + ' plugged in - a new drive: set it up under Drives first.';
+      end;
     // only when the window is not on screen (or about to be, at a start with /show) - otherwise it is noise
     if not Visible and not (FStarting and Application.ShowMainForm) then TrayIcon.ShowBalloonHint;
     ShowWindow;
+    // with the window open the balloon is left out, so say it in the window, and flash its taskbar button in case
+    // it is behind other windows
+    if not FStarting then
+    begin
+      if FThread = nil then StatusBar.Panels[0].Text := Said;
+      FlashTaskbar;
+    end;
     // not away from unsaved changes on the Drives or Settings page
     if (FThread = nil) and not FDrivesPage.Modified and not FSettingsPage.Modified then
     begin
@@ -664,6 +706,15 @@ begin
     LabelTotalPct.Caption := IntToStr(P.Percent) + '% of ' + FormatSize(P.BytesTotal);
   end;
   ProgressBar.Position := P.Percent;
+  // while checksums are recorded, the lower bar shows how far that is (the copy itself is done)
+  if P.Hashing then
+  begin
+    LabelTotalBar.Caption := 'Checksums:';
+    if P.HashBytes > 0 then ProgressBar.Position := Trunc(100.0 * P.HashBytesDone / P.HashBytes)
+    else ProgressBar.Position := 100;
+    LabelTotalPct.Caption := IntToStr(ProgressBar.Position) + '% of ' + FormatSize(P.HashBytes);
+  end
+  else LabelTotalBar.Caption := 'Total:';
   // the file bar: copies only - a verify or MD5 check reads files without reporting each one
   LabelFileBar.Visible := not P.Verifying and not P.Checking;
   ProgressFile.Visible := LabelFileBar.Visible;
@@ -676,7 +727,8 @@ begin
   end
   else
   begin
-    LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
+    if P.Hashing then LabelFile.Caption := 'Reading: ' + ExtractFileName(P.CurrentFile)
+    else LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
     if P.CurrentFileSize > 0 then ProgressFile.Position := Trunc(100.0 * P.CurrentFileDone / P.CurrentFileSize)
     else ProgressFile.Position := 100;
     LabelFilePct.Caption := IntToStr(ProgressFile.Position) + '% of ' + FormatSize(P.CurrentFileSize);

@@ -14,6 +14,11 @@
 - **Open MD5 file...** starts in the plugged-in OFFLINE drive's mirror folder, where its `.md5` files are;
   **Check again** checks the same file again.
 - Settings shows where VeraCrypt was found and where the settings file is kept.
+- **Recording checksums** after a copy shows its progress: the file being read, files and bytes done, the reading
+  rate and time left. On a first copy this step reads the whole backup again, so it takes a while.
+- With the window open, plugging in a drive says so in the status bar and flashes the taskbar button (the balloon
+  is still only for when the window is hidden); a drive that goes away (unplugged or dismounted) is said in the
+  status bar and the log.
 
 ## 0.9.2 - 2026-11-03
 
