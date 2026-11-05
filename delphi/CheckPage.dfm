@@ -32,6 +32,39 @@ object FrameCheck: TFrameCheck
       TabOrder = 1
     end
   end
+  object PanelRecord: TPanel
+    Left = 0
+    Height = 64
+    Top = 453
+    Width = 618
+    Align = alBottom
+    BevelOuter = bvNone
+    TabOrder = 2
+    object CheckRecord: TCheckBox
+      Left = 12
+      Height = 19
+      Top = 6
+      Width = 600
+      Anchors = [akTop, akLeft, akRight]
+      Caption = 'Record checksums after each copy (needed for Verify, the .md5 files and move detection)'
+      Checked = True
+      State = cbChecked
+      OnClick = CheckRecordClick
+      TabOrder = 0
+    end
+    object LabelRecordNote: TLabel
+      Left = 31
+      Height = 30
+      Top = 28
+      Width = 581
+      Anchors = [akTop, akLeft, akRight]
+      AutoSize = False
+      Caption = 
+        'This is about every copy, not only the check here. Off: a copy ends sooner (on a first copy, much ' +
+        'sooner), and Verify drive adds the missing checksums later.'
+      WordWrap = True
+    end
+  end
   object PageCheck: TPageControl
     AlignWithMargins = True
     Left = 8
@@ -41,7 +74,7 @@ object FrameCheck: TFrameCheck
     Margins.Left = 8
     Margins.Top = 8
     Margins.Right = 0
-    Margins.Bottom = 8
+    Margins.Bottom = 0
     ActivePage = TabSummary
     Align = alClient
     TabOrder = 0

@@ -227,6 +227,13 @@ relative to the file's folder). **Open MD5 file...** starts in the plugged-in dr
 match, are bad, missing or unreadable (**Summary** tab) and which ones (**Files** tab). **Check again** checks the
 same file again.
 
+**Record checksums after each copy** (at the bottom of the MD5 check page, on by default) is about every copy, not
+only the MD5 check: after a folder is copied, its copied files are read again from the source for their checksums.
+On a first copy that is the whole backup, so it takes a while. Switched off, copies end sooner, but the files just
+copied have no checksum yet: moves of them aren't detected (they are copied again), they aren't in the `.md5` files,
+and Verify drive has nothing to compare them with. The end of the run says so; the next **Verify drive** records
+their checksums, so nothing is lost for good.
+
 ## Settings
 
 **Settings** (sidebar or tray menu) holds what is the same for every drive, on five tabs:

@@ -16,6 +16,9 @@
 - Settings shows where VeraCrypt was found and where the settings file is kept.
 - **Recording checksums** after a copy shows its progress: the file being read, files and bytes done, the reading
   rate and time left. On a first copy this step reads the whole backup again, so it takes a while.
+- New setting, on the **MD5 check** page: **Record checksums after each copy** (on by default). Off, a copy ends
+  sooner; its files get no checksum yet (so no move detection and no `.md5` entry for them), the end of the run
+  says so, and **Verify drive** records the missing checksums later. Nothing is lost.
 - With the window open, plugging in a drive says so in the status bar and flashes the taskbar button (the balloon
   is still only for when the window is hidden); a drive that goes away (unplugged or dismounted) is said in the
   status bar and the log.

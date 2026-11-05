@@ -18,6 +18,7 @@ type
     Last: TCopyProgress;      // the last progress report of a run
     FileOverrun: Integer;     // reports whose current file was further along than its size
     LastHash: TCopyProgress;  // the last report while checksums were being recorded (HashFiles = 0: none)
+    LogText: string;          // everything logged, one line each
     SkipMissing: Boolean;
     MissingAsked: string;
     procedure Log(const Msg: string);
@@ -40,6 +41,7 @@ var
 
 procedure THandlers.Log(const Msg: string);
 begin
+  LogText := LogText + Msg + #10;
   WriteLn('  log: ', Msg);
 end;
 
@@ -472,6 +474,21 @@ begin
   Check((R = crOk) and (H.Last.Skipped = 120), 'files without a checksum get one (' + IntToStr(H.Last.Skipped) + ')');
   R := RunVerifyOn(Drive);
   Check((R = crOk) and (H.Last.Skipped = 0), '... and are checked the next time');
+
+  // switched off: a changed file is copied without a checksum, and its old one goes, so Verify adds a fresh one
+  // instead of calling the file bad
+  Settings.RecordChecksums := False;
+  WriteFile(Work + 'src\One\a.txt', 'alpha, changed with checksums off');
+  H.LogText := '';
+  R := RunCopy(True);
+  Settings.RecordChecksums := True;
+  Check((R = crOk) and (ReadFile(Mirror + 'One\a.txt') = 'alpha, changed with checksums off') and
+    (RecordedCrc(Drive, 'One', 'a.txt') = ''), 'checksums switched off: the file is copied, without a checksum');
+  Check(Pos('checksums not recorded', H.LogText) > 0, '... and the log says to run Verify drive');
+  R := RunVerifyOn(Drive);
+  Check((R = crOk) and (H.Last.Errors = 0) and (H.Last.Skipped = 1) and
+    (RecordedCrc(Drive, 'One', 'a.txt') = CrcHex(Work + 'src\One\a.txt')),
+    'Verify drive then records its checksum instead of calling it bad (' + IntToStr(H.Last.Skipped) + ' new)');
 end;
 
 function RunWithPreview(const S: TBackupSettings; const D: string): TCopyResult;
@@ -861,8 +878,13 @@ begin
   Check(T.DismountAfterCopy and (T.VeraCryptExe = S.VeraCryptExe), '... dismount after copy and VeraCrypt.exe read back');
   S.DismountAfterCopy := False;
   S.VeraCryptExe := '';
+  Check(S.RecordChecksums, 'checksums are recorded after each copy by default');
+  S.RecordChecksums := False;
+  SaveSettings(F, S);
+  Check(not LoadSettings(F).RecordChecksums, '... and switching that off is read back');
+  S.RecordChecksums := True;
 
-  Sys := UpCase((GetEnvironmentVariable('SystemDrive') + 'C')[1]);
+  Sys :=UpCase((GetEnvironmentVariable('SystemDrive') + 'C')[1]);
   // VeraCrypt: the Windows drive is never a VeraCrypt volume, a made-up VeraCrypt.exe is not used,
   // and dismounting a letter that is no VeraCrypt volume has nothing to do
   Check(not IsVeraCryptVolume(Sys), 'the Windows drive is not a VeraCrypt volume');

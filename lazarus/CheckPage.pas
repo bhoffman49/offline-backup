@@ -29,7 +29,11 @@ type
     LabelFiles: TLabel;
     ListFiles: TListView;
     Md5Dialog: TOpenDialog;
+    PanelRecord: TPanel;
+    CheckRecord: TCheckBox;
+    LabelRecordNote: TLabel;
     procedure ButtonOpenClick(Sender: TObject);
+    procedure CheckRecordClick(Sender: TObject);
     procedure ButtonAgainClick(Sender: TObject);
     procedure ListSummarySelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
     procedure ListSummaryDblClick(Sender: TObject);
@@ -41,6 +45,8 @@ type
     FBusy: Boolean;
     FDrives: TOfflineDriveArray;  // OFFLINE drives plugged in, for where Open MD5 file starts
     FOnCheck: TCheckFileEvent;
+    FOnRecordChange: TNotifyEvent;
+    FSetting: Boolean;            // SetRecordChecksums is setting the tick: not a change by the user
     function Md5Folder: string;
     procedure ShowStatus(Row: Integer);
     procedure UpdateButtons;
@@ -48,9 +54,13 @@ type
     procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult);
     procedure SetBusy(Busy: Boolean);
     procedure SetDrives(const Drives: TOfflineDriveArray);
+    // the 'record checksums after each copy' setting, shown on this page
+    procedure SetRecordChecksums(Value: Boolean);
+    function RecordChecksums: Boolean;
     // asks for an .md5 file and checks it
     procedure OpenFile;
     property OnCheck: TCheckFileEvent read FOnCheck write FOnCheck;      // check this file now
+    property OnRecordChange: TNotifyEvent read FOnRecordChange write FOnRecordChange;   // the tick was changed
   end;
 
 implementation
@@ -136,6 +146,27 @@ begin
   // one thing at a time: not while a copy, verify or check is running
   ButtonOpen.Enabled := not FBusy;
   ButtonAgain.Enabled := not FBusy and (FMd5File <> '');
+  CheckRecord.Enabled := not FBusy;      // a copy that is running keeps the setting it started with
+end;
+
+procedure TFrameCheck.SetRecordChecksums(Value: Boolean);
+begin
+  FSetting := True;
+  try
+    CheckRecord.Checked := Value;
+  finally
+    FSetting := False;
+  end;
+end;
+
+function TFrameCheck.RecordChecksums: Boolean;
+begin
+  Result := CheckRecord.Checked;
+end;
+
+procedure TFrameCheck.CheckRecordClick(Sender: TObject);
+begin
+  if not FSetting and Assigned(FOnRecordChange) then FOnRecordChange(Self);
 end;
 
 procedure TFrameCheck.SetDrives(const Drives: TOfflineDriveArray);

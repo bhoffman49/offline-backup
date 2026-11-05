@@ -95,6 +95,7 @@ type
     procedure SetStatus(const S: string);
     procedure OpenSettings;
     procedure SettingsSaved(const Settings: TBackupSettings);
+    procedure RecordChecksumsChanged(Sender: TObject);
     procedure OpenDrives;
     procedure CheckRequested(const Md5File: string);
     procedure DrivesChanged(Sender: TObject);
@@ -161,6 +162,8 @@ begin
   FCheckPage.Parent := Self;
   FCheckPage.Align := alClient;
   FCheckPage.OnCheck := CheckRequested;
+  FCheckPage.SetRecordChecksums(FSettings.RecordChecksums);
+  FCheckPage.OnRecordChange := RecordChecksumsChanged;
   FSettingsPage := TFrameSettings.Create(Self);
   FSettingsPage.Visible := False;
   FSettingsPage.Parent := Self;
@@ -590,10 +593,24 @@ begin
   FSide.ItemIndex := AREA_SETTINGS;
 end;
 
+{ The 'record checksums after each copy' tick on the MD5 check page: saved straight away, like the preview's tick }
+procedure TFormMain.RecordChecksumsChanged(Sender: TObject);
+begin
+  FSettings.RecordChecksums := FCheckPage.RecordChecksums;
+  SaveSettings(SettingsFileName, FSettings);
+  if not FSettingsPage.Modified then FSettingsPage.Load(FSettings);
+  if FSettings.RecordChecksums then AddLog('checksums are recorded after each copy again')
+  else AddLog('checksums are no longer recorded after each copy - Verify drive adds them (switch it back on under MD5 check)');
+end;
+
 { Save on the Settings page }
 procedure TFormMain.SettingsSaved(const Settings: TBackupSettings);
+var
+  Keep: Boolean;
 begin
+  Keep := FSettings.RecordChecksums;   // set on the MD5 check page, not on the Settings page
   FSettings := Settings;
+  FSettings.RecordChecksums := Keep;
   FDrivesPage.SetDrives(FDrives, FSettings);    // Add starting folders uses the new ones
   if SaveSettings(SettingsFileName, FSettings) then AddLog('settings saved to ' + SettingsFileName)
   else MessageDlg('Could not save the settings to ' + SettingsFileName + '. They are used until the app is closed.',
@@ -830,6 +847,8 @@ begin
     else
       Line := 'FAILED - see the log.';
     end;
+  if not T.Verifying and T.Engine.ChecksumsSkipped and (T.CopyResult in [crOk, crIncomplete]) then
+    Line := Line + ' Checksums not recorded - run Verify drive to add them.';
   if FRunSummary <> '' then FRunSummary := FRunSummary + sLineBreak;
   FRunSummary := FRunSummary + T.DriveLabel + ': ' + Line;
 end;
