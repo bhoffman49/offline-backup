@@ -23,7 +23,7 @@ echo Delphi not found - skipped
 if not exist "%FPC%" goto nofpc
 if not exist "%BUILD%\fpc" mkdir "%BUILD%\fpc"
 echo === Free Pascal build
-"%FPC%" -B -vw- -Fu..\common -FE"%BUILD%\fpc" -FU"%BUILD%\fpc" EngineTest.dpr
+"%FPC%" -B -O3 -vw- -Fu..\common -FE"%BUILD%\fpc" -FU"%BUILD%\fpc" EngineTest.dpr
 if errorlevel 1 exit /b 1
 call :run "%BUILD%\fpc\EngineTest.exe" fpc
 exit /b %RC%

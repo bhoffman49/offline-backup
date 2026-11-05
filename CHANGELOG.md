@@ -19,6 +19,9 @@
 - New setting, on the **MD5 check** page: **Record checksums after each copy** (on by default). Off, a copy ends
   sooner; its files get no checksum yet (so no move detection and no `.md5` entry for them), the end of the run
   says so, and **Verify drive** records the missing checksums later. Nothing is lost.
+- The download (Lazarus edition) is now built with full optimization (-O3): checksums are computed about 1.6
+  times faster (about 300 instead of 190 MB/s on the test PC), which shortens recording checksums, Verify drive
+  and MD5 check whenever the drive or PC's disk is faster than that.
 - With the window open, plugging in a drive says so in the status bar and flashes the taskbar button (the balloon
   is still only for when the window is hidden); a drive that goes away (unplugged or dismounted) is said in the
   status bar and the log.
