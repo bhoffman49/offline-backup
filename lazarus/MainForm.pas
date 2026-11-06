@@ -8,8 +8,8 @@ unit MainForm;
 interface
 
 uses
-  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus, InterfaceBase,
-  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage;
+  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus, InterfaceBase, LMessages,
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, AboutBox;
 
 const
   // the areas of the sidebar, in its order
@@ -121,6 +121,9 @@ type
     procedure CopyMissing(const Path: UnicodeString; var Skip: Boolean);
     procedure CopyPreview(const P: TCopyPreview; var GoAhead: Boolean);
     procedure CopyDone(Sender: TObject);
+    procedure WMSysCommand(var Msg: TLMSysCommand); message LM_SYSCOMMAND;
+  protected
+    procedure CreateWnd; override;
   end;
 
 var
@@ -131,6 +134,19 @@ implementation
 {$R *.lfm}
 
 { TFormMain }
+
+// the window handle can be made again (LCL does that on some changes), so the About item is added each time
+procedure TFormMain.CreateWnd;
+begin
+  inherited;
+  AddAboutToSystemMenu(Handle);
+end;
+
+procedure TFormMain.WMSysCommand(var Msg: TLMSysCommand);
+begin
+  if (Msg.CmdType and $FFF0) = SC_ABOUTBOX then ShowAboutBox(Self)
+  else inherited;
+end;
 
 procedure TFormMain.FormCreate(Sender: TObject);
 begin

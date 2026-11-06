@@ -25,6 +25,8 @@
 - With the window open, plugging in a drive says so in the status bar and flashes the taskbar button (the balloon
   is still only for when the window is hidden); a drive that goes away (unplugged or dismounted) is said in the
   status bar and the log.
+- **About Offline Backup...** in the window's title-bar menu (click the icon at the top left, or Alt+Space):
+  the version, the developer and links to the website and the source code.
 
 ## 0.9.2 - 2026-11-03
 

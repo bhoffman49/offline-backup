@@ -7,7 +7,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, UITypes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage;
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, AboutBox;
 
 const
   // the areas of the sidebar, in its order
@@ -116,6 +116,9 @@ type
     procedure CopyMissing(const Path: string; var Skip: Boolean);
     procedure CopyPreview(const P: TCopyPreview; var GoAhead: Boolean);
     procedure CopyDone(Sender: TObject);
+    procedure WMSysCommand(var Msg: TWMSysCommand); message WM_SYSCOMMAND;
+  protected
+    procedure CreateWnd; override;
   end;
 
 var
@@ -124,6 +127,19 @@ var
 implementation
 
 {$R *.dfm}
+
+// the window handle can be made again (LCL does that on some changes), so the About item is added each time
+procedure TFormMain.CreateWnd;
+begin
+  inherited;
+  AddAboutToSystemMenu(Handle);
+end;
+
+procedure TFormMain.WMSysCommand(var Msg: TWMSysCommand);
+begin
+  if (Msg.CmdType and $FFF0) = SC_ABOUTBOX then ShowAboutBox(Self)
+  else inherited;
+end;
 
 procedure TFormMain.FormCreate(Sender: TObject);
 begin
