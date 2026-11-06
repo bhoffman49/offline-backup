@@ -8,27 +8,45 @@ unit MainForm;
 interface
 
 uses
-  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SettingsForm, DriveForm, PreviewForm, CheckForm;
+  Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus, InterfaceBase, LMessages,
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, AboutBox;
+
+const
+  // the areas of the sidebar, in its order
+  AREA_BACKUP = 0;
+  AREA_DRIVES = 1;
+  AREA_CHECK = 2;
+  AREA_SETTINGS = 3;
 
 type
 
   { TFormMain }
 
   TFormMain = class(TForm)
-    LabelDrives: TLabel;
+    StatusBar: TStatusBar;
+    PanelBackup: TPanel;
+    PanelBackupActions: TPanel;
     ButtonStart: TButton;
     ButtonCancel: TButton;
-    ButtonSettings: TButton;
-    ButtonDrives: TButton;
-    ButtonCheck: TButton;
     ButtonDismount: TButton;
-    Md5Dialog: TOpenDialog;
+    PageBackup: TPageControl;
+    TabDrivesIn: TTabSheet;
+    LabelDrives: TLabel;
+    ListDrives: TListView;
+    SplitterProgress: TSplitter;
+    PanelProgress: TPanel;
+    TabLog: TTabSheet;
     LabelStatus: TLabel;
+    LabelFile: TLabel;
+    LabelFileBar: TLabel;
+    ProgressFile: TProgressBar;
+    LabelFilePct: TLabel;
+    LabelTotalBar: TLabel;
+    ProgressBar: TProgressBar;
+    LabelTotalPct: TLabel;
     LabelEta: TLabel;
     LabelCounts: TLabel;
     LabelRate: TLabel;
-    ProgressBar: TProgressBar;
     MemoLog: TMemo;
     TrayIcon: TTrayIcon;
     TrayMenu: TPopupMenu;
@@ -45,10 +63,10 @@ type
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
     procedure ButtonStartClick(Sender: TObject);
     procedure ButtonCancelClick(Sender: TObject);
-    procedure ButtonSettingsClick(Sender: TObject);
-    procedure ButtonDrivesClick(Sender: TObject);
-    procedure ButtonCheckClick(Sender: TObject);
     procedure ButtonDismountClick(Sender: TObject);
+    procedure MenuSettingsClick(Sender: TObject);
+    procedure MenuDrivesClick(Sender: TObject);
+    procedure MenuCheckClick(Sender: TObject);
     procedure TrayIconClick(Sender: TObject);
     procedure MenuShowClick(Sender: TObject);
     procedure MenuExitClick(Sender: TObject);
@@ -64,14 +82,32 @@ type
     FRunAllStopped: Boolean;          // every drive stopped by the user (Cancel in the preview): no popup
     FThread: TOfflineCopyThread;
     FQuitting: Boolean;
+    FSide: TSideBar;
+    FDrivesPage: TFrameDrives;
+    FCheckPage: TFrameCheck;
+    FSettingsPage: TFrameSettings;
+    FReadyHint: string;               // what the status bar says while nothing else has happened
+    procedure SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
+    procedure SideChange(Sender: TObject);
+    procedure DrivesVerify(const Drive: TOfflineDrive);
+    procedure DrivesPageChanged(Sender: TObject);
+    procedure ShowProgressTab;
+    procedure SetStatus(const S: string);
+    procedure OpenSettings;
+    procedure SettingsSaved(const Settings: TBackupSettings);
+    procedure RecordChecksumsChanged(Sender: TObject);
+    procedure OpenDrives;
+    procedure CheckRequested(const Md5File: string);
     procedure DrivesChanged(Sender: TObject);
     procedure RefreshDrives(Announce: Boolean);
     procedure LogDriveState(const D: TOfflineDrive);
+    function LastCopyText(const D: TOfflineDrive): string;
     procedure StartNext;
     procedure StartVerify(const Drive: TOfflineDrive);
     procedure StartThread(T: TOfflineCopyThread);
     procedure UpdateButtons;
     procedure ShowWindow;
+    procedure FlashTaskbar;
     procedure AddLog(const Msg: string);
     procedure QueryEndSession(var Cancel: Boolean);
     // the engine's events use UnicodeString; LCL strings are UTF-8
@@ -85,6 +121,9 @@ type
     procedure CopyMissing(const Path: UnicodeString; var Skip: Boolean);
     procedure CopyPreview(const P: TCopyPreview; var GoAhead: Boolean);
     procedure CopyDone(Sender: TObject);
+    procedure WMSysCommand(var Msg: TLMSysCommand); message LM_SYSCOMMAND;
+  protected
+    procedure CreateWnd; override;
   end;
 
 var
@@ -96,6 +135,19 @@ implementation
 
 { TFormMain }
 
+// the window handle can be made again (LCL does that on some changes), so the About item is added each time
+procedure TFormMain.CreateWnd;
+begin
+  inherited;
+  AddAboutToSystemMenu(Handle);
+end;
+
+procedure TFormMain.WMSysCommand(var Msg: TLMSysCommand);
+begin
+  if (Msg.CmdType and $FFF0) = SC_ABOUTBOX then ShowAboutBox(Self)
+  else inherited;
+end;
+
 procedure TFormMain.FormCreate(Sender: TObject);
 begin
   FSettings := LoadSettings(SettingsFileName);
@@ -103,6 +155,37 @@ begin
   TrayIcon.Hint := 'Offline Backup';
   TrayIcon.Visible := True;
   Caption := 'Offline Backup ' + AppVersion;
+  FSide := TSideBar.Create(Self);
+  FSide.Parent := Self;
+  FSide.Align := alLeft;
+  FSide.Width := FSide.PreferredWidth;
+  FSide.AddItem('Backup', 'backup');
+  FSide.AddItem('Drives', 'drives');
+  FSide.AddItem('MD5 check', 'check');
+  FSide.AddItem('Settings', 'settings');
+  FSide.AddItem('Restore', 'restore', False);   // still to come
+  FSide.ItemIndex := AREA_BACKUP;
+  FSide.OnChanging := SideChanging;
+  FSide.OnChange := SideChange;
+  FDrivesPage := TFrameDrives.Create(Self);
+  FDrivesPage.Visible := False;
+  FDrivesPage.Parent := Self;
+  FDrivesPage.Align := alClient;
+  FDrivesPage.OnVerify := DrivesVerify;
+  FDrivesPage.OnChanged := DrivesPageChanged;
+  FCheckPage := TFrameCheck.Create(Self);
+  FCheckPage.Visible := False;
+  FCheckPage.Parent := Self;
+  FCheckPage.Align := alClient;
+  FCheckPage.OnCheck := CheckRequested;
+  FCheckPage.SetRecordChecksums(FSettings.RecordChecksums);
+  FCheckPage.OnRecordChange := RecordChecksumsChanged;
+  FSettingsPage := TFrameSettings.Create(Self);
+  FSettingsPage.Visible := False;
+  FSettingsPage.Parent := Self;
+  FSettingsPage.Align := alClient;
+  FSettingsPage.Load(FSettings);
+  FSettingsPage.OnSave := SettingsSaved;
   Application.OnQueryEndSession := QueryEndSession;
   FWatcher := TDriveWatcher.Create;
   FWatcher.OnChange := DrivesChanged;
@@ -144,6 +227,21 @@ begin
   BringToFront;
 end;
 
+{ Flashes the window's taskbar button until the window is looked at (does nothing while it is in front). The LCL
+  may give the taskbar button to the application's own window, so that one flashes too. }
+procedure TFormMain.FlashTaskbar;
+var
+  FI: TFlashWInfo;
+begin
+  FillChar(FI, SizeOf(FI), 0);
+  FI.cbSize := SizeOf(FI);
+  FI.hwnd := Handle;
+  FI.dwFlags := FLASHW_TRAY or FLASHW_TIMERNOFG;
+  FlashWindowEx(@FI);
+  FI.hwnd := WidgetSet.AppHandle;
+  FlashWindowEx(@FI);
+end;
+
 procedure TFormMain.TrayIconClick(Sender: TObject);
 begin
   ShowWindow;
@@ -162,8 +260,54 @@ begin
     MessageDlg('A copy is running. Cancel it first, then exit.', mtInformation, [mbOK], 0);
     Exit;
   end;
+  if FDrivesPage.Modified or FSettingsPage.Modified then
+  begin
+    ShowWindow;
+    if not FDrivesPage.AskToSave or not FSettingsPage.AskToSave then Exit;
+  end;
   FQuitting := True;
   Close;
+end;
+
+{ Leaving an area with unsaved changes: save them, drop them, or stay }
+procedure TFormMain.SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
+begin
+  if FSide.ItemIndex = AREA_DRIVES then Allow := FDrivesPage.AskToSave
+  else if FSide.ItemIndex = AREA_SETTINGS then Allow := FSettingsPage.AskToSave;
+end;
+
+{ The sidebar picked another area: show its page }
+procedure TFormMain.SideChange(Sender: TObject);
+begin
+  PanelBackup.Visible := FSide.ItemIndex = AREA_BACKUP;
+  FDrivesPage.Visible := FSide.ItemIndex = AREA_DRIVES;
+  FCheckPage.Visible := FSide.ItemIndex = AREA_CHECK;
+  FSettingsPage.Visible := FSide.ItemIndex = AREA_SETTINGS;
+end;
+
+procedure TFormMain.DrivesVerify(const Drive: TOfflineDrive);
+begin
+  StartVerify(Drive);
+end;
+
+{ A drive was set up or its folders saved }
+procedure TFormMain.DrivesPageChanged(Sender: TObject);
+begin
+  RefreshDrives(False);
+end;
+
+{ A copy, verify or check is starting: show its progress, under the drives plugged in }
+procedure TFormMain.ShowProgressTab;
+begin
+  if FSide.ItemIndex <> AREA_BACKUP then FSide.ItemIndex := AREA_BACKUP;
+  PageBackup.ActivePage := TabDrivesIn;
+end;
+
+{ The latest news, both on the Progress tab and in the status bar, where it shows whatever area is open }
+procedure TFormMain.SetStatus(const S: string);
+begin
+  LabelStatus.Caption := S;
+  StatusBar.Panels[0].Text := S;
 end;
 
 procedure TFormMain.AddLog(const Msg: string);
@@ -181,22 +325,34 @@ var
   Old: TOfflineDriveArray;
   I, J: Integer;
   Known: Boolean;
-  Names, Added: string;
+  Added, Gone, Hint, Said: string;
 begin
   Old := FDrives;
   FDrives := FindOfflineDrives;
-  Names := '';
+  Gone := '';
+  FDrivesPage.SetDrives(FDrives, FSettings);
+  FCheckPage.SetDrives(FDrives);
   Added := '';
+  ListDrives.Items.BeginUpdate;
+  try
+    ListDrives.Items.Clear;
+    for I := 0 to High(FDrives) do
+      with ListDrives.Items.Add do
+      begin
+        Caption := Copy(FDrives[I].Root, 1, 2);
+        if FDrives[I].VeraCrypt then SubItems.Add(FDrives[I].VolLabel + ' [VeraCrypt]')
+        else SubItems.Add(FDrives[I].VolLabel);
+        if not FDrives[I].SetUp and (FDrives[I].Description <> '') then
+          SubItems.Add(FDrives[I].Description + ' - no folders chosen yet')
+        else if not FDrives[I].SetUp then SubItems.Add('new - set it up under Drives')
+        else SubItems.Add(FDrives[I].Description);
+        SubItems.Add(LastCopyText(FDrives[I]));
+      end;
+  finally
+    ListDrives.Items.EndUpdate;
+  end;
   for I := 0 to High(FDrives) do
   begin
-    if Names <> '' then Names := Names + ', ';
-    Names := Names + FDrives[I].VolLabel + ' on ' + Copy(FDrives[I].Root, 1, 2);
-    // right after the letter, so a long line cut off at the window's edge still shows it
-    if FDrives[I].VeraCrypt then Names := Names + ' [VeraCrypt]';
-    if not FDrives[I].SetUp and (FDrives[I].Description <> '') then
-      Names := Names + ' (' + FDrives[I].Description + ' - no folders chosen yet)'
-    else if not FDrives[I].SetUp then Names := Names + ' (new - not set up)'
-    else if FDrives[I].Description <> '' then Names := Names + ' (' + FDrives[I].Description + ')';
     Known := False;
     for J := 0 to High(Old) do
       if (Old[J].Root = FDrives[I].Root) and (Old[J].VolLabel = FDrives[I].VolLabel) then Known := True;
@@ -206,9 +362,40 @@ begin
       Added := Added + FDrives[I].VolLabel + ' (' + Copy(FDrives[I].Root, 1, 2) + ')';
     end;
   end;
-  if Names = '' then LabelDrives.Caption := 'No OFFLINE-x drive plugged in.'
-  else LabelDrives.Caption := 'Plugged in: ' + Names;
+  for J := 0 to High(Old) do
+  begin
+    Known := False;
+    for I := 0 to High(FDrives) do
+      if (Old[J].Root = FDrives[I].Root) and (Old[J].VolLabel = FDrives[I].VolLabel) then Known := True;
+    if not Known then
+    begin
+      if Gone <> '' then Gone := Gone + ', ';
+      Gone := Gone + Old[J].VolLabel + ' (' + Copy(Old[J].Root, 1, 2) + ')';
+    end;
+  end;
+  if Length(FDrives) = 0 then
+    LabelDrives.Caption := 'No OFFLINE-x drive plugged in. Plug in a backup drive whose name (volume label) is ' +
+      'OFFLINE-A, OFFLINE-B, ... and it shows up here.'
+  else LabelDrives.Caption := 'Start copy copies to every drive below that has been set up. A new drive is set up ' +
+    'under Drives first.';
+  if Length(FDrives) = 0 then StatusBar.Panels[1].Text := 'No OFFLINE drive plugged in'
+  else if Length(FDrives) = 1 then StatusBar.Panels[1].Text := '1 OFFLINE drive plugged in'
+  else StatusBar.Panels[1].Text := IntToStr(Length(FDrives)) + ' OFFLINE drives plugged in';
+  // until there is news of a copy, the status bar says what to do next
+  if Length(FDrives) = 0 then Hint := 'Plug in an OFFLINE drive to back up to.'
+  else Hint := 'Ready - press Start copy.';
+  for I := High(FDrives) downto 0 do
+    if not FDrives[I].SetUp then Hint := FDrives[I].VolLabel + ' is new - set it up under Drives first.';
+  if (StatusBar.Panels[0].Text = '') or (StatusBar.Panels[0].Text = FReadyHint) then
+    StatusBar.Panels[0].Text := Hint;
+  FReadyHint := Hint;
   UpdateButtons;
+  // a drive that went away (unplugged, or dismounted in VeraCrypt) - said in the window, not in a balloon
+  if Announce and (Gone <> '') then
+  begin
+    AddLog('gone: ' + Gone + ' (unplugged or dismounted)');
+    if FThread = nil then StatusBar.Panels[0].Text := Gone + ' is gone - unplugged or dismounted.';
+  end;
   if Announce and (Added <> '') then
   begin
     AddLog('plugged in: ' + Added);
@@ -221,12 +408,29 @@ begin
     end;
     TrayIcon.BalloonTitle := 'Offline Backup';
     TrayIcon.BalloonHint := Added + ' plugged in. Open the window to start the copy.';
+    Said := Added + ' plugged in.';
     for I := 0 to High(FDrives) do
       if not FDrives[I].SetUp and (Pos(FDrives[I].VolLabel, Added) > 0) then
-        TrayIcon.BalloonHint := Added + ' plugged in. New drive - set it up under Drives... before copying.';
-    // only when the window is not on screen (or about to be, at a start with /show) - otherwise it is noise
+      begin
+        TrayIcon.BalloonHint := Added + ' plugged in. New drive - set it up under Drives before copying.';
+        Said := Added + ' plugged in - a new drive: set it up under Drives first.';
+      end;
+    // only when the window is not on screen (or about to be, at a start without /tray) - otherwise it is noise
     if not Visible and not (FStarting and Application.ShowMainForm) then TrayIcon.ShowBalloonHint;
     ShowWindow;
+    // with the window open the balloon is left out, so say it in the window, and flash its taskbar button in case
+    // it is behind other windows
+    if not FStarting then
+    begin
+      if FThread = nil then StatusBar.Panels[0].Text := Said;
+      FlashTaskbar;
+    end;
+    // not away from unsaved changes on the Drives or Settings page
+    if (FThread = nil) and not FDrivesPage.Modified and not FSettingsPage.Modified then
+    begin
+      if FSide.ItemIndex <> AREA_BACKUP then FSide.ItemIndex := AREA_BACKUP;
+      PageBackup.ActivePage := TabDrivesIn;
+    end;
   end;
 end;
 
@@ -239,7 +443,7 @@ var
   I: Integer;
 begin
   if not ReadDriveInfo(D.Root, Info) then
-    AddLog(D.VolLabel + ': new drive, not set up yet - use Drives... to set it up')
+    AddLog(D.VolLabel + ': new drive, not set up yet - set it up under Drives')
   else
   begin
     if Length(Info.Runs) = 0 then
@@ -254,12 +458,24 @@ begin
         if Names <> '' then Names := Names + ', ';
         Names := Names + Folders[I].Name;
       end;
-    if not Info.HasList then Names := 'nothing yet - choose its folders under Drives...'
+    if not Info.HasList then Names := 'nothing yet - choose its folders under Drives'
     else if Names = '' then Names := 'nothing ticked';
     AddLog(D.VolLabel + ': backs up ' + Names);
     if Length(Info.Removed) > 0 then
       AddLog(D.VolLabel + ': ' + IntToStr(Length(Info.Removed)) + ' folder(s) to move to _versions at the next copy');
   end;
+end;
+
+{ The Last copy column of the drive list }
+function TFormMain.LastCopyText(const D: TOfflineDrive): string;
+var
+  Info: TDriveInfo;
+begin
+  if not ReadDriveInfo(D.Root, Info) then Result := ''
+  else if Length(Info.Runs) = 0 then Result := 'not copied to yet'
+  else    // without the PC's name, which the History tab under Drives shows
+    Result := Info.Runs[High(Info.Runs)].When + '  ' + Info.Runs[High(Info.Runs)].Result + '  ' +
+      FormatSize(Info.Runs[High(Info.Runs)].Bytes) + ' copied';
 end;
 
 procedure TFormMain.UpdateButtons;
@@ -275,12 +491,10 @@ begin
   MenuStart.Enabled := ButtonStart.Enabled;
   ButtonCancel.Enabled := FThread <> nil;
   // not while copying: the run in progress keeps the settings it started with
-  ButtonSettings.Enabled := FThread = nil;
-  MenuSettings.Enabled := ButtonSettings.Enabled;
-  ButtonDrives.Enabled := (FThread = nil) and (Length(FDrives) > 0);
-  MenuDrives.Enabled := ButtonDrives.Enabled;
-  ButtonCheck.Enabled := FThread = nil;
-  MenuCheck.Enabled := ButtonCheck.Enabled;
+  FDrivesPage.SetBusy(FThread <> nil);
+  FCheckPage.SetBusy(FThread <> nil);
+  FSettingsPage.SetBusy(FThread <> nil);
+  MenuCheck.Enabled := FThread = nil;
   // Dismount only shows when a VeraCrypt OFFLINE volume is mounted - everyone else never sees it
   Vera := 0;
   VeraName := '';
@@ -318,6 +532,7 @@ begin
   if Length(FQueue) = 0 then Exit;
   ProgressBar.Position := 0;
   ClearProgress;
+  ShowProgressTab;
   StartNext;
 end;
 
@@ -327,6 +542,7 @@ var
 begin
   if Length(FQueue) = 0 then
   begin
+    RefreshDrives(False);             // the drive list's Last copy, from the drive maps the run updated
     UpdateButtons;
     ShowRunSummary;
     Exit;
@@ -369,31 +585,57 @@ begin
   end;
 end;
 
-procedure TFormMain.ButtonSettingsClick(Sender: TObject);
-var
-  S: TBackupSettings;
+procedure TFormMain.MenuSettingsClick(Sender: TObject);
 begin
-  if Assigned(FThread) then Exit;
   ShowWindow;
-  S := FSettings;
-  if not TFormSettings.Execute(Self, S) then Exit;
-  FSettings := S;
+  OpenSettings;
+end;
+
+procedure TFormMain.MenuDrivesClick(Sender: TObject);
+begin
+  ShowWindow;
+  OpenDrives;
+end;
+
+procedure TFormMain.MenuCheckClick(Sender: TObject);
+begin
+  ShowWindow;
+  FSide.ItemIndex := AREA_CHECK;
+  if FSide.ItemIndex = AREA_CHECK then FCheckPage.OpenFile;    // not if the Drives page kept its unsaved edits
+end;
+
+procedure TFormMain.OpenSettings;
+begin
+  FSide.ItemIndex := AREA_SETTINGS;
+end;
+
+{ The 'record checksums after each copy' tick on the MD5 check page: saved straight away, like the preview's tick }
+procedure TFormMain.RecordChecksumsChanged(Sender: TObject);
+begin
+  FSettings.RecordChecksums := FCheckPage.RecordChecksums;
+  SaveSettings(SettingsFileName, FSettings);
+  if not FSettingsPage.Modified then FSettingsPage.Load(FSettings);
+  if FSettings.RecordChecksums then AddLog('checksums are recorded after each copy again')
+  else AddLog('checksums are no longer recorded after each copy - Verify drive adds them (switch it back on under MD5 check)');
+end;
+
+{ Save on the Settings page }
+procedure TFormMain.SettingsSaved(const Settings: TBackupSettings);
+var
+  Keep: Boolean;
+begin
+  Keep := FSettings.RecordChecksums;   // set on the MD5 check page, not on the Settings page
+  FSettings := Settings;
+  FSettings.RecordChecksums := Keep;
+  FDrivesPage.SetDrives(FDrives, FSettings);    // Add starting folders uses the new ones
   if SaveSettings(SettingsFileName, FSettings) then AddLog('settings saved to ' + SettingsFileName)
   else MessageDlg('Could not save the settings to ' + SettingsFileName + '. They are used until the app is closed.',
     mtWarning, [mbOK], 0);
 end;
 
-procedure TFormMain.ButtonDrivesClick(Sender: TObject);
-var
-  I, Select, V: Integer;
+procedure TFormMain.OpenDrives;
 begin
-  if Assigned(FThread) or (Length(FDrives) = 0) then Exit;
-  ShowWindow;
-  Select := 0;                        // a new drive first, as that is usually why the window is opened
-  for I := High(FDrives) downto 0 do
-    if not FDrives[I].SetUp then Select := I;
-  if TFormDrive.Execute(Self, FDrives, Select, FSettings, V) then RefreshDrives(False);
-  if (V >= 0) and (V <= High(FDrives)) then StartVerify(FDrives[V]);
+  FSide.ItemIndex := AREA_DRIVES;
 end;
 
 procedure TFormMain.StartVerify(const Drive: TOfflineDrive);
@@ -405,6 +647,7 @@ begin
   FRunAllStopped := True;
   ProgressBar.Position := 0;
   ClearProgress;
+  ShowProgressTab;
   AddLog('verifying ' + Drive.VolLabel + ' (' + Copy(Drive.Root, 1, 2) + ')');
   StartThread(TOfflineCopyThread.Create(FSettings, Drive, True));
 end;
@@ -459,20 +702,20 @@ begin
     Screen.Cursor := crDefault;
   end;
   RefreshDrives(False);
-  if Done <> '' then LabelStatus.Caption := Done + ': dismounted - safe to unplug';
+  if Done <> '' then SetStatus(Done + ': dismounted - safe to unplug');
   if Problems <> '' then MessageDlg(Problems, mtWarning, [mbOK], 0);
 end;
 
-procedure TFormMain.ButtonCheckClick(Sender: TObject);
+{ Open MD5 file or Check again on the MD5 check page: the progress shows under Backup, the result back on the page }
+procedure TFormMain.CheckRequested(const Md5File: string);
 begin
   if Assigned(FThread) then Exit;
-  ShowWindow;
-  if not Md5Dialog.Execute then Exit;
   FQueue := nil;
   ProgressBar.Position := 0;
   ClearProgress;
-  AddLog('checking ' + Md5Dialog.FileName);
-  StartThread(TOfflineCopyThread.CreateCheck(FSettings, Md5Dialog.FileName));
+  ShowProgressTab;
+  AddLog('checking ' + Md5File);
+  StartThread(TOfflineCopyThread.CreateCheck(FSettings, Md5File));
 end;
 
 procedure TFormMain.CopyLog(const Msg: UnicodeString);
@@ -483,7 +726,7 @@ end;
 procedure TFormMain.CopyProgress(const P: TCopyProgress);
 begin
   FLastProgress := P;
-  LabelStatus.Caption := P.Status;
+  SetStatus(P.Status);
   if P.Folder = '' then
     ClearProgress
   else
@@ -491,14 +734,46 @@ begin
     LabelEta.Caption := ProgressEtaLine(P);
     LabelCounts.Caption := ProgressCountsLine(P);
     LabelRate.Caption := ProgressRateLine(P);
+    LabelTotalPct.Caption := IntToStr(P.Percent) + '% of ' + FormatSize(P.BytesTotal);
   end;
   ProgressBar.Position := P.Percent;
+  // while checksums are recorded, the lower bar shows how far that is (the copy itself is done)
+  if P.Hashing then
+  begin
+    LabelTotalBar.Caption := 'Checksums:';
+    if P.HashBytes > 0 then ProgressBar.Position := Trunc(100.0 * P.HashBytesDone / P.HashBytes)
+    else ProgressBar.Position := 100;
+    LabelTotalPct.Caption := IntToStr(ProgressBar.Position) + '% of ' + FormatSize(P.HashBytes);
+  end
+  else LabelTotalBar.Caption := 'Total:';
+  // the file bar: copies only - a verify or MD5 check reads files without reporting each one
+  LabelFileBar.Visible := not P.Verifying and not P.Checking;
+  ProgressFile.Visible := LabelFileBar.Visible;
+  LabelFilePct.Visible := LabelFileBar.Visible;
+  if P.CurrentFile = '' then
+  begin
+    LabelFile.Caption := '';
+    LabelFilePct.Caption := '';
+    ProgressFile.Position := 0;
+  end
+  else
+  begin
+    if P.Hashing then LabelFile.Caption := 'Reading: ' + ExtractFileName(P.CurrentFile)
+    else LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
+    if P.CurrentFileSize > 0 then ProgressFile.Position := Trunc(100.0 * P.CurrentFileDone / P.CurrentFileSize)
+    else ProgressFile.Position := 100;
+    LabelFilePct.Caption := IntToStr(ProgressFile.Position) + '% of ' + FormatSize(P.CurrentFileSize);
+  end;
   if P.Speed < 0 then TrayIcon.Hint := 'Offline Backup - ' + IntToStr(P.Percent) + '%'
   else TrayIcon.Hint := 'Offline Backup - ' + IntToStr(P.Percent) + '% at ' + FormatSpeed(P.Speed);
 end;
 
 procedure TFormMain.ClearProgress;
 begin
+  LabelFile.Caption := '';
+  LabelFilePct.Caption := '';
+  LabelTotalPct.Caption := '';
+  ProgressFile.Position := 0;
   LabelEta.Caption := '';
   LabelCounts.Caption := '';
   LabelRate.Caption := '';
@@ -525,6 +800,7 @@ begin
   begin
     FSettings.PreviewAlways := Always;
     SaveSettings(SettingsFileName, FSettings);
+    if not FSettingsPage.Modified then FSettingsPage.Load(FSettings);   // the tick on the page too
     if Always then AddLog('the preview now shows before every copy')
     else AddLog('the preview now shows only when files would be deleted or moved (change it back in Settings)');
   end;
@@ -587,6 +863,8 @@ begin
     else
       Line := 'FAILED - see the log.';
     end;
+  if not T.Verifying and T.Engine.ChecksumsSkipped and (T.CopyResult in [crOk, crIncomplete]) then
+    Line := Line + ' Checksums not recorded - run Verify drive to add them.';
   if FRunSummary <> '' then FRunSummary := FRunSummary + sLineBreak;
   FRunSummary := FRunSummary + T.DriveLabel + ': ' + Line;
 end;
@@ -614,20 +892,20 @@ begin
   TrayIcon.Hint := 'Offline Backup';
   if T.Checking then
   begin
-    if T.CopyResult = crOk then LabelStatus.Caption := ExtractFileName(T.CheckFile) + ': all files match'
-    else if T.CopyResult = crCancelled then LabelStatus.Caption := ExtractFileName(T.CheckFile) + ': check cancelled'
-    else LabelStatus.Caption := ExtractFileName(T.CheckFile) + ': problems found - see the list';
+    if T.CopyResult = crOk then SetStatus(ExtractFileName(T.CheckFile) + ': all files match')
+    else if T.CopyResult = crCancelled then SetStatus(ExtractFileName(T.CheckFile) + ': check cancelled')
+    else SetStatus(ExtractFileName(T.CheckFile) + ': problems found - see MD5 check');
   end
   else if T.Verifying then
   begin
-    if T.CopyResult = crOk then LabelStatus.Caption := T.DriveLabel + ': verified ok - every file matches'
-    else if T.CopyResult = crCancelled then LabelStatus.Caption := T.DriveLabel + ': verify cancelled'
-    else LabelStatus.Caption := T.DriveLabel + ': verify found problems - see the log below';
+    if T.CopyResult = crOk then SetStatus(T.DriveLabel + ': verified ok - every file matches')
+    else if T.CopyResult = crCancelled then SetStatus(T.DriveLabel + ': verify cancelled')
+    else SetStatus(T.DriveLabel + ': verify found problems - see the Log tab');
   end
-  else if T.CopyResult = crOk then LabelStatus.Caption := T.DriveLabel + ': done - ' + UnplugAdvice(T)
+  else if T.CopyResult = crOk then SetStatus(T.DriveLabel + ': done - ' + UnplugAdvice(T))
   else if T.CopyResult = crIncomplete then
-    LabelStatus.Caption := T.DriveLabel + ': done except the missing folder(s) - ' + UnplugAdvice(T)
-  else LabelStatus.Caption := T.DriveLabel + ': ' + CopyResultText(T.CopyResult) + ' - see the log below';
+    SetStatus(T.DriveLabel + ': done except the missing folder(s) - ' + UnplugAdvice(T))
+  else SetStatus(T.DriveLabel + ': ' + CopyResultText(T.CopyResult) + ' - see the Log tab');
   if not Visible then
   begin
     TrayIcon.BalloonTitle := 'Offline Backup';
@@ -641,7 +919,8 @@ begin
     TrayIcon.Hint := 'Offline Backup';
     UpdateButtons;
     ShowWindow;
-    TFormCheck.Execute(Self, T.CheckFile, T.Engine.CheckItems, T.CopyResult);
+    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult);
+    FSide.ItemIndex := AREA_CHECK;
     Exit;
   end;
   if FQuitting then Close else StartNext;

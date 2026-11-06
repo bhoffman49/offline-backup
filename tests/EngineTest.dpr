@@ -16,6 +16,9 @@ type
     Answer: Boolean;
     Asked: string;
     Last: TCopyProgress;      // the last progress report of a run
+    FileOverrun: Integer;     // reports whose current file was further along than its size
+    LastHash: TCopyProgress;  // the last report while checksums were being recorded (HashFiles = 0: none)
+    LogText: string;          // everything logged, one line each
     SkipMissing: Boolean;
     MissingAsked: string;
     procedure Log(const Msg: string);
@@ -38,12 +41,15 @@ var
 
 procedure THandlers.Log(const Msg: string);
 begin
+  LogText := LogText + Msg + #10;
   WriteLn('  log: ', Msg);
 end;
 
 procedure THandlers.Progress(const P: TCopyProgress);
 begin
   Last := P;
+  if (P.CurrentFileDone < 0) or (P.CurrentFileDone > P.CurrentFileSize) then Inc(FileOverrun);
+  if P.Hashing then LastHash := P;
 end;
 
 procedure ShowLast;
@@ -468,6 +474,21 @@ begin
   Check((R = crOk) and (H.Last.Skipped = 120), 'files without a checksum get one (' + IntToStr(H.Last.Skipped) + ')');
   R := RunVerifyOn(Drive);
   Check((R = crOk) and (H.Last.Skipped = 0), '... and are checked the next time');
+
+  // switched off: a changed file is copied without a checksum, and its old one goes, so Verify adds a fresh one
+  // instead of calling the file bad
+  Settings.RecordChecksums := False;
+  WriteFile(Work + 'src\One\a.txt', 'alpha, changed with checksums off');
+  H.LogText := '';
+  R := RunCopy(True);
+  Settings.RecordChecksums := True;
+  Check((R = crOk) and (ReadFile(Mirror + 'One\a.txt') = 'alpha, changed with checksums off') and
+    (RecordedCrc(Drive, 'One', 'a.txt') = ''), 'checksums switched off: the file is copied, without a checksum');
+  Check(Pos('checksums not recorded', H.LogText) > 0, '... and the log says to run Verify drive');
+  R := RunVerifyOn(Drive);
+  Check((R = crOk) and (H.Last.Errors = 0) and (H.Last.Skipped = 1) and
+    (RecordedCrc(Drive, 'One', 'a.txt') = CrcHex(Work + 'src\One\a.txt')),
+    'Verify drive then records its checksum instead of calling it bad (' + IntToStr(H.Last.Skipped) + ' new)');
 end;
 
 function RunWithPreview(const S: TBackupSettings; const D: string): TCopyResult;
@@ -857,8 +878,13 @@ begin
   Check(T.DismountAfterCopy and (T.VeraCryptExe = S.VeraCryptExe), '... dismount after copy and VeraCrypt.exe read back');
   S.DismountAfterCopy := False;
   S.VeraCryptExe := '';
+  Check(S.RecordChecksums, 'checksums are recorded after each copy by default');
+  S.RecordChecksums := False;
+  SaveSettings(F, S);
+  Check(not LoadSettings(F).RecordChecksums, '... and switching that off is read back');
+  S.RecordChecksums := True;
 
-  Sys := UpCase((GetEnvironmentVariable('SystemDrive') + 'C')[1]);
+  Sys :=UpCase((GetEnvironmentVariable('SystemDrive') + 'C')[1]);
   // VeraCrypt: the Windows drive is never a VeraCrypt volume, a made-up VeraCrypt.exe is not used,
   // and dismounting a letter that is no VeraCrypt volume has nothing to do
   Check(not IsVeraCryptVolume(Sys), 'the Windows drive is not a VeraCrypt volume');
@@ -1034,6 +1060,11 @@ begin
     IntToStr(H.Last.FilesDone) + ' of ' + IntToStr(H.Last.FilesTotal) + ')');
   Check((H.Last.Errors = 0) and (H.Last.Skipped = 0), 'no errors or skipped files');
   Check((H.Last.Percent = 100) and (H.Last.BytesCopied = H.Last.BytesTotal), 'progress ends at 100%');
+  Check((H.Last.CurrentFile = '') and (H.Last.CurrentFileSize = 0) and (H.FileOverrun = 0),
+    'current file: never past its size, cleared at the end');
+  Check((H.LastHash.HashFiles > 0) and (H.LastHash.HashBytes > 0) and
+    (H.LastHash.HashBytesDone <= H.LastHash.HashBytes) and not H.Last.Hashing,
+    'recording checksums reports its progress, and is over at the end (' + IntToStr(H.LastHash.HashFiles) + ' files)');
   // 513 bytes can't have gone at MB/s - the final rate must be the real average, not robocopy's overhead
   Check((H.Last.Speed >= 0) and (H.Last.Speed < 100 * 1024), 'final rate is the real average (' +
     FormatSpeed(H.Last.Speed) + ')');

@@ -7,11 +7,11 @@ uses
   System.SysUtils,
   Vcl.Forms,
   MainForm in 'MainForm.pas' {FormMain},
-  SettingsForm in 'SettingsForm.pas' {FormSettings},
+  SettingsPage in 'SettingsPage.pas' {FrameSettings: TFrame},
   SourceForm in 'SourceForm.pas' {FormSource},
-  DriveForm in 'DriveForm.pas' {FormDrive},
+  DrivesPage in 'DrivesPage.pas' {FrameDrives: TFrame},
   PreviewForm in 'PreviewForm.pas' {FormPreview},
-  CheckForm in 'CheckForm.pas' {FormCheck},
+  CheckPage in 'CheckPage.pas' {FrameCheck: TFrame},
   OfflineEngine in '..\common\OfflineEngine.pas',
   DriveWatcher in '..\common\DriveWatcher.pas';
 
@@ -27,7 +27,8 @@ begin
   Application.Initialize;
   Application.Title := 'Offline Backup';
   Application.MainFormOnTaskbar := True;
-  Application.ShowMainForm := FindCmdLineSwitch('show');   // otherwise starts in the tray
+  // opens its window, so nobody wonders whether it started; /tray starts it in the tray only (e.g. at log-on)
+  Application.ShowMainForm := not FindCmdLineSwitch('tray');
   Application.CreateForm(TFormMain, FormMain);
   Application.Run;
   CloseHandle(Mutex);

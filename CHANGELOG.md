@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.10.0 - not released yet
+
+- **A new window.** A sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and
+  **Settings** - tabs along the top, the area's buttons on the right and a status bar at the bottom (what is
+  happening, and how many OFFLINE drives are plugged in). Drives, MD5 check and Settings are pages of the main
+  window now instead of separate windows; the preview and the end-of-run summary still pop up, as they ask
+  something. The tray icon and its menu work as before.
+- **Progress under the drive list**, with two bars: the file being copied (its name and how far it is) and the
+  whole run. Drag the divider to give either more room.
+- Changes on the Drives and Settings pages wait for **Save**; **Undo changes** goes back to what was saved, and
+  leaving a page with unsaved changes asks first. While a copy runs, every page can be looked at but not changed.
+- **Open MD5 file...** starts in the plugged-in OFFLINE drive's mirror folder, where its `.md5` files are;
+  **Check again** checks the same file again.
+- Settings shows where VeraCrypt was found and where the settings file is kept.
+- **Recording checksums** after a copy shows its progress: the file being read, files and bytes done, the reading
+  rate and time left. On a first copy this step reads the whole backup again, so it takes a while.
+- New setting, on the **MD5 check** page: **Record checksums after each copy** (on by default). Off, a copy ends
+  sooner; its files get no checksum yet (so no move detection and no `.md5` entry for them), the end of the run
+  says so, and **Verify drive** records the missing checksums later. Nothing is lost.
+- The download (Lazarus edition) is now built with full optimization (-O3): checksums are computed about 1.6
+  times faster (about 300 instead of 190 MB/s on the test PC), which shortens recording checksums, Verify drive
+  and MD5 check whenever the drive or PC's disk is faster than that.
+- With the window open, plugging in a drive says so in the status bar and flashes the taskbar button (the balloon
+  is still only for when the window is hidden); a drive that goes away (unplugged or dismounted) is said in the
+  status bar and the log.
+- **About Offline Backup...** in the window's title-bar menu (click the icon at the top left, or Alt+Space):
+  the version, the developer and links to the website and the source code.
+- **The window opens when Offline Backup starts**, so it is plain that it is running; closing it keeps the program
+  in the tray as before. Start it with `/tray` (for example from a shortcut in the Startup folder) to start in the
+  tray only. `/show` is no longer needed.
+
 ## 0.9.2 - 2026-11-03
 
 - VeraCrypt: OFFLINE drives that are mounted VeraCrypt volumes are marked `[VeraCrypt]`, and a **Dismount**

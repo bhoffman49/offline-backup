@@ -53,6 +53,9 @@ type
     // show the preview before every copy; False: only when something would be deleted from the drive
     PreviewAlways: Boolean;
     DismountAfterCopy: Boolean;  // VeraCrypt drives are dismounted when their copy went well
+    // CRC32 + MD5 of each copied file, read again from the source after the copy (needed for Verify drive, the .md5
+    // files and move detection). Off: copies are quicker; Verify drive records the missing checksums later
+    RecordChecksums: Boolean;
     VeraCryptExe: string;        // VeraCrypt.exe for a portable VeraCrypt; '' = the installed one (only in the INI)
   end;
 
@@ -133,6 +136,18 @@ type
     SecondsLeft: Integer;        // -1 while not known
     Percent: Integer;
     Moved: Integer;              // files moved on the drive instead of copied
+    // the file robocopy is copying now ('' between files and outside a copy; small files may not show at all), its
+    // size and how much of it has been written so far (robocopy's write counter since the file was first seen, so an
+    // estimate, never above the size)
+    CurrentFile: string;
+    CurrentFileSize, CurrentFileDone: Int64;
+    // recording checksums after a folder's copy: the copied files are read again from the source. Hashing is True
+    // meanwhile; files and bytes read so far of the folder's copied files, the read rate and the time left
+    Hashing: Boolean;
+    HashFiles, HashFilesDone: Integer;
+    HashBytes, HashBytesDone: Int64;
+    HashSpeed: Int64;            // bytes per second, -1 while not known
+    HashSecondsLeft: Integer;    // -1 while not known
     // a Verify run: FilesDone = files read, Errors = files that do not match their checksum (or could not be
     // read), Skipped = files that had no checksum yet and got one now
     Verifying: Boolean;
@@ -177,9 +192,11 @@ type
     FList: TBackupSourceArray;   // the folders this drive backs up (from its drive map)
     FCopied: TPathList;          // source paths robocopy copied in the folder just done (for the checksums)
     FLastReport: DWORD;
+    FHashStarted: TDateTime;
     FHistorySaved: Boolean;
     FVeraCrypt: Boolean;
     FDismounted: Boolean;
+    FChecksumsSkipped: Boolean;  // RecordChecksums is off and files were copied without one
     function DoRun: TCopyResult;
     procedure MoveRemovedFolders(const Stamp: string);
     procedure SaveHistory(R: TCopyResult);
@@ -197,6 +214,8 @@ type
     procedure FindMoves(const Src: TBackupSource; Plan: TCopyPlan);
     procedure DoMoves(const Src: TBackupSource; Plan: TCopyPlan);
     procedure CountBytes(N: Int64);
+    procedure HashBytes(N: Int64);
+    procedure HashReport(Always: Boolean);
   public
     AllowFolderTarget: Boolean;  // tests only: lets Drive be a plain folder instead of an OFFLINE-x drive
     AssumeYes: Boolean;          // skip the brake question (like the script's -Yes)
@@ -223,6 +242,8 @@ type
     // after Run: the drive is a VeraCrypt volume, and whether it was dismounted (DismountAfterCopy)
     property VeraCrypt: Boolean read FVeraCrypt;
     property Dismounted: Boolean read FDismounted;
+    // after Run: files were copied, but their checksums not recorded (RecordChecksums off)
+    property ChecksumsSkipped: Boolean read FChecksumsSkipped;
   end;
 
   { Runs a TOfflineCopy in the background; its events fire on the main thread. }
@@ -270,7 +291,7 @@ type
 
 function PreviewKindText(K: TPreviewKind): string;   // 'Files to add', ...
 const
-  AppVersion = '0.9.2';         // shown in the window title; make-release.cmd reads it from this line
+  AppVersion = '0.10.0';         // shown in the window title; make-release.cmd reads it from this line
 
 function DefaultSettings: TBackupSettings;
 // settings file: OfflineBackup.ini next to the exe (each edition has its own), or in %APPDATA%\OfflineBackup\
@@ -376,6 +397,7 @@ begin
   Result.LogFile := ExtractFilePath(SettingsFileName) + 'offline-copy.log';
   Result.PreviewAlways := True;
   Result.DismountAfterCopy := False;
+  Result.RecordChecksums := True;
   Result.VeraCryptExe := '';
 end;
 
@@ -430,6 +452,12 @@ end;
 
 function ProgressEtaLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then
+  begin
+    if P.HashSecondsLeft < 0 then Result := 'Checksums: time left - working it out'
+    else Result := 'Checksums: about ' + FormatDuration(P.HashSecondsLeft) + ' left';
+    Exit(Result + '  (' + FormatSize(P.HashBytesDone) + ' of ' + FormatSize(P.HashBytes) + ' read again from the source)');
+  end;
   if P.SecondsLeft < 0 then Result := 'Estimated time left: working it out'
   else Result := 'Estimated time left: ' + FormatDuration(P.SecondsLeft);
   Result := Result + '  (' + FormatSize(P.BytesCopied) + ' of ' + FormatSize(P.BytesTotal) + ' copied)';
@@ -437,6 +465,9 @@ end;
 
 function ProgressCountsLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then
+    Exit(Format('Files read: %s of %s     (copying is done - this records each file''s CRC32 and MD5)',
+      [FormatFloat('#,##0', P.HashFilesDone), FormatFloat('#,##0', P.HashFiles)]));
   if P.Checking then
     Exit(Format('Checked: %d (%s)     Bad: %d     Missing: %d     Tot: %d (%s)',
       [P.FilesDone, FormatSize(P.FilesDoneBytes), P.Errors, P.Skipped, P.FilesTotal, FormatSize(P.BytesTotal)]));
@@ -450,6 +481,7 @@ end;
 
 function ProgressRateLine(const P: TCopyProgress): string;
 begin
+  if P.Hashing then Exit('Reading rate: ' + FormatSpeed(P.HashSpeed));
   Result := 'Transfer rate: ' + FormatSpeed(P.Speed) + '  (' + FormatDuration(P.Elapsed) + ')';
 end;
 
@@ -951,6 +983,7 @@ begin
   if Result.LogFile = '' then Result.LogFile := DefaultSettings.LogFile;
   Result.PreviewAlways := IniStr(E, 'General', 'PreviewAlways', '1') <> '0';
   Result.DismountAfterCopy := IniStr(E, 'General', 'DismountAfterCopy', '0') = '1';
+  Result.RecordChecksums := IniStr(E, 'General', 'RecordChecksums', '1') <> '0';
   Result.VeraCryptExe := IniStr(E, 'General', 'VeraCryptExe', '');
   // a file without a [Sources] section keeps the default sources; Count=0 means none
   if IniHas(E, 'Sources', 'Count') then
@@ -996,6 +1029,7 @@ begin
     'LogFile=' + S.LogFile + #13#10 +
     'PreviewAlways=' + IntToStr(Ord(S.PreviewAlways)) + #13#10 +
     'DismountAfterCopy=' + IntToStr(Ord(S.DismountAfterCopy)) + #13#10 +
+    'RecordChecksums=' + IntToStr(Ord(S.RecordChecksums)) + #13#10 +
     // empty: the installed VeraCrypt; a portable VeraCrypt's VeraCrypt.exe can be put here
     'VeraCryptExe=' + S.VeraCryptExe + #13#10 +
     // the count also tells LoadSettings that an empty [Exclude] really is empty
@@ -2085,6 +2119,7 @@ var
   Finished, HaveCur: Boolean;
   I, Cut, Done, Errs: Integer;
   Io: TIoCounters;
+  Writes, FileStart: UInt64;    // robocopy's write counter: now, and when the current file started
   SampleBytes: array[0..SpeedSamples - 1] of UInt64;
   SampleTime: array[0..SpeedSamples - 1] of TDateTime;
   Samples: Integer;
@@ -2098,6 +2133,7 @@ var
     Inc(FProgress.FilesDone);
     Inc(FProgress.FilesDoneBytes, CurSize);
     HaveCur := False;
+    if SameText(FProgress.CurrentFile, CurPath) then FProgress.CurrentFile := '';
   end;
 
 begin
@@ -2113,6 +2149,8 @@ begin
   Samples := 0;
   HaveCur := False;
   CurSize := 0;
+  Writes := 0;
+  FileStart := 0;
   Done := 0;
   Errs := 0;
   DoneBytes := 0;
@@ -2147,13 +2185,23 @@ begin
             Inc(FProgress.Errors);
             Inc(FProgress.ErrorBytes, CurSize);
             HaveCur := False;
+            FProgress.CurrentFile := '';
           end;
+        end;
+        // robocopy ends a file's line only when the file is done, so the line still open names the file being copied
+        // now - shown in the window, but counted only once its line is whole
+        if ParseRoboLine(Pending, CopyKeywords, Kw, Num, P) and not SameText(P, FProgress.CurrentFile) then
+        begin
+          FileStart := Writes;
+          FProgress.CurrentFile := P;
+          FProgress.CurrentFileSize := Num;
         end;
       end;
       if Finished and not FCancelled then FileFinished;
       if GetProcessIoCounters_(H, Io) then
       begin
         FProgress.BytesCopied := BytesBefore + Int64(Io.WriteTransferCount);
+        Writes := Io.WriteTransferCount;
         if Samples = SpeedSamples then
         begin
           Move(SampleBytes[1], SampleBytes[0], (SpeedSamples - 1) * SizeOf(UInt64));
@@ -2168,8 +2216,15 @@ begin
           FProgress.Speed := Round((SampleBytes[Samples - 1] - SampleBytes[0]) /
             ((SampleTime[Samples - 1] - SampleTime[0]) * 86400));
       end;
+      if FProgress.CurrentFile = '' then FProgress.CurrentFileDone := 0
+      else if Writes - FileStart > UInt64(FProgress.CurrentFileSize) then
+        FProgress.CurrentFileDone := FProgress.CurrentFileSize
+      else FProgress.CurrentFileDone := Int64(Writes - FileStart);
       Report;
     until Finished;
+    FProgress.CurrentFile := '';
+    FProgress.CurrentFileSize := 0;
+    FProgress.CurrentFileDone := 0;
     if not GetExitCodeProcess(H, Code) then Code := 16;
     Result := Integer(Code);
   finally
@@ -2447,26 +2502,72 @@ var
   SSize, STime, DSize, DTime: Int64;
   I, J, N: Integer;
   Gone: Boolean;
+  Sizes: array of Int64;        // of the copied files, for the progress
+
+  { Reads each copied file again from the source for its CRC32 and MD5 - into Added }
+  procedure HashCopied;
+  var
+    I: Integer;
+  begin
+    FProgress.Status := 'Recording checksums for ' + FProgress.Folder + ' (' + IntToStr(Length(FCopied)) + ' files)';
+    // how much there is to read, so the window can show how far it is and how long it will take
+    FProgress.Hashing := True;
+    FProgress.HashFiles := 0;
+    FProgress.HashFilesDone := 0;
+    FProgress.HashBytes := 0;
+    FProgress.HashBytesDone := 0;
+    FProgress.HashSpeed := -1;
+    FProgress.HashSecondsLeft := -1;
+    SetLength(Sizes, Length(FCopied));
+    for I := 0 to High(FCopied) do
+    begin
+      Sizes[I] := 0;
+      if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
+      if FileStamp(FCopied[I], SSize, STime) then Sizes[I] := SSize;
+      Inc(FProgress.HashFiles);
+      Inc(FProgress.HashBytes, Sizes[I]);
+    end;
+    FHashStarted := Now;
+    HashReport(True);
+    try
+      for I := 0 to High(FCopied) do
+      begin
+        if FCancelled then Exit;
+        if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
+        Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
+        FProgress.CurrentFile := FCopied[I];
+        FProgress.CurrentFileSize := Sizes[I];
+        FProgress.CurrentFileDone := 0;
+        if FileSums(FCopied[I], False, Crc, Md5, HashBytes, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
+           FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
+        begin
+          SetLength(Added, Length(Added) + 1);
+          Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);
+        end;
+        Inc(FProgress.HashFilesDone);
+        HashReport(False);
+      end;
+    finally
+      FProgress.Hashing := False;
+      FProgress.CurrentFile := '';
+      FProgress.CurrentFileSize := 0;
+      FProgress.CurrentFileDone := 0;
+    end;
+    Report;
+  end;
+
 begin
   if (Length(FCopied) = 0) and (Length(Plan.DeleteFiles) = 0) and (Length(Plan.DeleteDirs) = 0) then Exit;
   ListFile := FDrive + ChecksumDir + '\' + Folder + '.crc';
   SrcRoot := NoTrailingSlash(Src) + '\';
   DestRoot := NoTrailingSlash(Dest) + '\';
-  FProgress.Status := 'Recording checksums for ' + FProgress.Folder + ' (' + IntToStr(Length(FCopied)) + ' files)';
-  Report;
   Added := nil;
-  for I := 0 to High(FCopied) do
-  begin
-    if FCancelled then Exit;
-    if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
-    Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
-    if FileSums(FCopied[I], False, Crc, Md5, nil, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
-       FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
-    begin
-      SetLength(Added, Length(Added) + 1);
-      Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);
-    end;
-  end;
+  if FSettings.RecordChecksums then HashCopied
+  else if Length(FCopied) > 0 then
+    // switched off: nothing is read. The old entries of copied files still go (below), so a later Verify drive
+    // records their checksums instead of calling them bad.
+    FChecksumsSkipped := True;
+  if FCancelled then Exit;
   SortCrcList(Added, 0, High(Added));
   // files robocopy deleted (and whole deleted folders) - their paths are on the drive
   DelFiles := nil;
@@ -2517,6 +2618,34 @@ function Seconds(Start: TDateTime): Double;
 begin
   Result := (Now - Start) * 86400;
   if Result < 1 then Result := 1;
+end;
+
+{ Bytes read for the checksums (FileSums' progress) }
+procedure TOfflineCopy.HashBytes(N: Int64);
+begin
+  Inc(FProgress.HashBytesDone, N);
+  Inc(FProgress.CurrentFileDone, N);
+  if FProgress.CurrentFileDone > FProgress.CurrentFileSize then FProgress.CurrentFileDone := FProgress.CurrentFileSize;
+  HashReport(False);
+end;
+
+{ The checksums' rate and time left, passed on at most twice a second (Always: now) }
+procedure TOfflineCopy.HashReport(Always: Boolean);
+var
+  T: DWORD;
+  Secs: Double;
+begin
+  T := GetTickCount;
+  if not Always and (T - FLastReport < 500) then Exit;
+  FLastReport := T;
+  Secs := (Now - FHashStarted) * 86400;
+  if (Secs >= 2) and (FProgress.HashBytesDone > 0) then
+  begin
+    FProgress.HashSpeed := Round(FProgress.HashBytesDone / Secs);
+    FProgress.HashSecondsLeft := Round((FProgress.HashBytes - FProgress.HashBytesDone) / (FProgress.HashBytesDone / Secs));
+    if FProgress.HashSecondsLeft < 0 then FProgress.HashSecondsLeft := 0;
+  end;
+  Report;
 end;
 
 procedure TOfflineCopy.CountBytes(N: Int64);
@@ -2894,15 +3023,15 @@ begin
   // only drives that have been set up (they carry a drive map) are copied to
   if not ReadDriveInfo(FDrive, FInfo) then
   begin
-    Log(DriveTag + ': new drive, not set up yet - nothing done. Set it up under Drives... first.');
-    SkipReason := 'new drive, not set up yet - set it up under Drives... first';
+    Log(DriveTag + ': new drive, not set up yet - nothing done. Set it up under Drives first.');
+    SkipReason := 'new drive, not set up yet - set it up under Drives first';
     Exit(crSkipped);
   end;
   // ... and that have had their folders chosen - a drive is never filled with folders it was not set up for
   if not FInfo.HasList then
   begin
-    Log(DriveTag + ': no folders chosen for this drive yet - nothing done. Choose them under Drives... first.');
-    SkipReason := 'no folders chosen for this drive yet - choose them under Drives...';
+    Log(DriveTag + ': no folders chosen for this drive yet - nothing done. Choose them under Drives first.');
+    SkipReason := 'no folders chosen for this drive yet - choose them under Drives';
     Exit(crSkipped);
   end;
   FList := Copy(FInfo.Sources);
@@ -3207,6 +3336,8 @@ begin
       else if FVeraCrypt then Log(DriveTag + ': ' + Status + ' - dismount it in VeraCrypt, then unplug')
       else if Flushed then Log(DriveTag + ': ' + Status + ' - everything written to the drive, safe to unplug')
       else Log(DriveTag + ': ' + Status + ' - could not flush the drive''s write cache; wait 30 seconds before unplugging');
+      if FChecksumsSkipped then
+        Log(DriveTag + ': checksums not recorded (switched off under MD5 check) - run Verify drive to add them');
       if MissingNames <> '' then Result := crIncomplete else Result := crOk;
     except
       on E: Exception do

@@ -6,7 +6,7 @@ program OfflineBackup;
 
 uses
   Interfaces, Forms, Windows, SysUtils,
-  MainForm, SettingsForm, SourceForm, DriveForm, PreviewForm, CheckForm, OfflineEngine, DriveWatcher;
+  MainForm, SettingsPage, SourceForm, DrivesPage, PreviewForm, CheckPage, OfflineEngine, DriveWatcher;
 
 {$R *.res}
 
@@ -20,7 +20,8 @@ begin
   RequireDerivedFormResource := True;
   Application.Scaled := True;
   Application.Title := 'Offline Backup';
-  Application.ShowMainForm := FindCmdLineSwitch('show');   // otherwise starts in the tray
+  // opens its window, so nobody wonders whether it started; /tray starts it in the tray only (e.g. at log-on)
+  Application.ShowMainForm := not FindCmdLineSwitch('tray');
   Application.Initialize;
   Application.CreateForm(TFormMain, FormMain);
   Application.Run;
