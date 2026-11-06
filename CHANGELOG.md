@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.0 - not released yet
+## 0.10.0 - 2026-11-06
 
 - **A new window.** A sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and
   **Settings** - tabs along the top, the area's buttons on the right and a status bar at the bottom (what is
