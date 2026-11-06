@@ -27,7 +27,8 @@ begin
   Application.Initialize;
   Application.Title := 'Offline Backup';
   Application.MainFormOnTaskbar := True;
-  Application.ShowMainForm := FindCmdLineSwitch('show');   // otherwise starts in the tray
+  // opens its window, so nobody wonders whether it started; /tray starts it in the tray only (e.g. at log-on)
+  Application.ShowMainForm := not FindCmdLineSwitch('tray');
   Application.CreateForm(TFormMain, FormMain);
   Application.Run;
   CloseHandle(Mutex);

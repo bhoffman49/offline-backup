@@ -12,7 +12,7 @@ Version **0.10.0** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.m
 
 1. Download `OfflineBackup-0.10.0-win64.zip` from the Releases page and unzip it to a folder you can write to
    (for example `Documents\OfflineBackup`).
-2. Start `OfflineBackup.exe` - it sits in the tray (add `/show` to open its window too).
+2. Start `OfflineBackup.exe` - its window opens, and it stays in the tray when you close the window.
    Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.
 3. Name a USB drive `OFFLINE-A` in File Explorer, plug it in, and set it up under **Drives** (what it is
    for, which folders it backs up). Then **Backup** > **Start copy**.
@@ -128,7 +128,8 @@ creates a `.dproj` and may regenerate `OfflineBackup.res` with its own icon. Set
 
 ## Use
 
-Start `OfflineBackup.exe` (add `/show` to open the window as well). It sits in the tray. When an
+Start `OfflineBackup.exe`: its window opens, and it also sits in the tray (add `/tray` to start it in the tray
+only, for example from a shortcut in the Startup folder). Closing the window keeps it running in the tray. When an
 `OFFLINE-x` drive is plugged in while the window is closed, it shows a balloon and opens its window.
 
 The window has a sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and

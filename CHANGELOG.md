@@ -27,6 +27,9 @@
   status bar and the log.
 - **About Offline Backup...** in the window's title-bar menu (click the icon at the top left, or Alt+Space):
   the version, the developer and links to the website and the source code.
+- **The window opens when Offline Backup starts**, so it is plain that it is running; closing it keeps the program
+  in the tray as before. Start it with `/tray` (for example from a shortcut in the Startup folder) to start in the
+  tray only. `/show` is no longer needed.
 
 ## 0.9.2 - 2026-11-03
 

@@ -418,7 +418,7 @@ begin
         TrayIcon.BalloonHint := Added + ' plugged in. New drive - set it up under Drives before copying.';
         Said := Added + ' plugged in - a new drive: set it up under Drives first.';
       end;
-    // only when the window is not on screen (or about to be, at a start with /show) - otherwise it is noise
+    // only when the window is not on screen (or about to be, at a start without /tray) - otherwise it is noise
     if not Visible and not (FStarting and Application.ShowMainForm) then TrayIcon.ShowBalloonHint;
     ShowWindow;
     // with the window open the balloon is left out, so say it in the window, and flash its taskbar button in case

@@ -20,8 +20,8 @@ INSTALL
 1. Unzip this folder somewhere you can write to, for example
    Documents\OfflineBackup. (Under Program Files works too; the settings then go
    to %APPDATA%\OfflineBackup.)
-2. Start OfflineBackup.exe. It sits in the tray, by the clock.
-   Add  /show  to a shortcut to open its window as well.
+2. Start OfflineBackup.exe. Its window opens; closing it keeps the program running
+   in the tray, by the clock. Add  /tray  to a shortcut to start it in the tray only.
 
 The first time, Windows may say "Windows protected your PC" because the program is
 new and not signed. Click "More info", then "Run anyway".
