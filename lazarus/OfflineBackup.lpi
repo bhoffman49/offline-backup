@@ -16,19 +16,22 @@
         <DpiAware Value="True/PM_V2"/>
       </XPManifest>
       <Icon Value="0"/>
-      <Resources Count="5">
+      <Resources Count="8">
         <Resource_0 FileName="..\common\icons\backup.ico" Type="RCDATA" ResourceName="SIDE_BACKUP"/>
         <Resource_1 FileName="..\common\icons\drives.ico" Type="RCDATA" ResourceName="SIDE_DRIVES"/>
         <Resource_2 FileName="..\common\icons\check.ico" Type="RCDATA" ResourceName="SIDE_CHECK"/>
         <Resource_3 FileName="..\common\icons\settings.ico" Type="RCDATA" ResourceName="SIDE_SETTINGS"/>
         <Resource_4 FileName="..\common\icons\restore.ico" Type="RCDATA" ResourceName="SIDE_RESTORE"/>
+        <Resource_5 FileName="..\common\icons\checksums.ico" Type="RCDATA" ResourceName="SIDE_CHECKSUMS"/>
+        <Resource_6 FileName="..\build\lazarus\stub\CheckStub.exe" Type="RCDATA" ResourceName="CHECKSTUB"/>
+        <Resource_7 FileName="..\common\icons\checksum-program.ico" Type="RCDATA" ResourceName="CHECKICON"/>
       </Resources>
     </General>
     <VersionInfo>
       <UseVersionInfo Value="True"/>
-      <MinorVersionNr Value="10"/>
+      <MinorVersionNr Value="11"/>
       <RevisionNr Value="0"/>
-      <StringTable FileDescription="Offline Backup - copies chosen folders to OFFLINE-x USB drives" LegalCopyright="Copyright (c) 2026 bhoffman - MIT License" ProductName="Offline Backup" ProductVersion="0.10.0"/>
+      <StringTable FileDescription="Offline Backup - copies chosen folders to OFFLINE-x USB drives" LegalCopyright="Copyright (c) 2026 bhoffman - MIT License" ProductName="Offline Backup" ProductVersion="0.11.0"/>
     </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="default" Default="True"/>
@@ -47,7 +50,7 @@
         <PackageName Value="LCL"/>
       </Item1>
     </RequiredPackages>
-    <Units Count="9">
+    <Units Count="13">
       <Unit0>
         <Filename Value="OfflineBackup.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -108,6 +111,26 @@
         <ResourceBaseClass Value="Frame"/>
         <UnitName Value="CheckPage"/>
       </Unit8>
+      <Unit9>
+        <Filename Value="ChecksumsPage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="FrameChecksums"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Frame"/>
+        <UnitName Value="ChecksumsPage"/>
+      </Unit9>
+      <Unit10>
+        <Filename Value="..\common\Hashes.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit10>
+      <Unit11>
+        <Filename Value="..\common\Digests.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit11>
+      <Unit12>
+        <Filename Value="..\common\Checksums.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit12>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

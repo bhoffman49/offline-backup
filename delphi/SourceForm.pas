@@ -1,6 +1,7 @@
 unit SourceForm;
 
-{ Edit one backup source: the folder, and the name it gets on the OFFLINE drive. Delphi VCL edition;
+{ Edit one backup source: the folder, the name it gets on the OFFLINE drive and - for a drive's own folder - whether
+  its changed and deleted files are archived (ARCHIVE\MMDDYY). Delphi VCL edition;
   the Lazarus edition has the same form in ..\lazarus\SourceForm.pas. }
 
 interface
@@ -18,6 +19,7 @@ type
     EditName: TEdit;
     LabelLands: TLabel;
     LabelNote: TLabel;
+    CheckArchive: TCheckBox;
     ButtonOK: TButton;
     ButtonCancel: TButton;
     FolderDialog: TFileOpenDialog;
@@ -27,9 +29,11 @@ type
   private
     FSources: TBackupSourceArray;
     FIndex: Integer;
+    FHadArchive: Boolean;       // the folder was archived when the window opened
   public
-    // edits Sources[Index] in place; False if cancelled
-    class function Execute(AOwner: TComponent; var Sources: TBackupSourceArray; Index: Integer): Boolean;
+    // edits Sources[Index] in place; False if cancelled. ShowArchive: also the archive tick (a drive's folder)
+    class function Execute(AOwner: TComponent; var Sources: TBackupSourceArray; Index: Integer;
+      ShowArchive: Boolean = False): Boolean;
   end;
 
 // shared by the Add button: is this folder one that can be backed up? '' if so, else the reason
@@ -53,7 +57,8 @@ begin
       Exit(Copy(Path, 1, 2) + ' is an OFFLINE drive - it can''t be backed up onto itself.');
 end;
 
-class function TFormSource.Execute(AOwner: TComponent; var Sources: TBackupSourceArray; Index: Integer): Boolean;
+class function TFormSource.Execute(AOwner: TComponent; var Sources: TBackupSourceArray; Index: Integer;
+  ShowArchive: Boolean): Boolean;
 var
   F: TFormSource;
 begin
@@ -63,11 +68,20 @@ begin
     F.FIndex := Index;
     F.EditPath.Text := Sources[Index].Path;
     F.EditName.Text := Sources[Index].Name;
+    F.FHadArchive := not Sources[Index].NoArchive;
+    F.CheckArchive.Checked := F.FHadArchive;
+    if not ShowArchive then
+    begin
+      // Settings' starting folders: the switch belongs to each drive's own list
+      F.CheckArchive.Visible := False;
+      F.ClientHeight := F.ClientHeight - 34;
+    end;
     Result := F.ShowModal = mrOk;
     if Result then
     begin
       Sources[Index].Path := NormalizeSourcePath(F.EditPath.Text);
       Sources[Index].Name := UniqueSourceName(Sources, Index, Sources[Index].Path, Trim(F.EditName.Text));
+      if ShowArchive then Sources[Index].NoArchive := not F.CheckArchive.Checked;
     end;
   finally
     F.Free;
@@ -110,6 +124,10 @@ begin
   end;
   if not DirectoryExists(Path) and (MessageDlg(Path + ' does not exist at the moment. Keep it anyway?',
     mtConfirmation, [mbYes, mbNo], 0) <> mrYes) then Exit;
+  if CheckArchive.Visible and FHadArchive and not CheckArchive.Checked and (MessageDlg('Without the archive, ' +
+    'a copy replaces and deletes this folder''s files on the drive straight away. A file that was damaged or ' +
+    'deleted on the PC then can''t be got back from this drive. Switch the archive off for this folder?',
+    mtWarning, [mbYes, mbNo], 0) <> mrYes) then Exit;
   ModalResult := mrOk;
 end;
 

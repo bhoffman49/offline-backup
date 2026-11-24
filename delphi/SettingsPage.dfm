@@ -45,7 +45,7 @@ object FrameSettings: TFrameSettings
     Align = alClient
     TabOrder = 0
     object TabSources: TTabSheet
-      Caption = 'Starting folders'
+      Caption = 'Folders for new drives'
       object LabelSources: TLabel
         AlignWithMargins = True
         Left = 12
@@ -59,8 +59,8 @@ object FrameSettings: TFrameSettings
         Align = alTop
         AutoSize = False
         Caption =
-          'Starting folders: when you set up a new drive under Drives, Add starting folders puts the ticked ones' +
-          ' on its list. Each drive keeps its own list after that.'
+          'When you set up a new drive under Drives, Add folders from Settings puts the ticked folders below on ' +
+          'its list. Each drive keeps its own list after that.'
         WordWrap = True
       end
       object PanelSourceButtons: TPanel
@@ -205,7 +205,7 @@ object FrameSettings: TFrameSettings
       end
     end
     object TabSafety: TTabSheet
-      Caption = 'Safety and versions'
+      Caption = 'Safety and archive'
       object LabelBrakePct: TLabel
         Left = 12
         Height = 15
@@ -244,7 +244,7 @@ object FrameSettings: TFrameSettings
         Top = 86
         Width = 480
         AutoSize = False
-        Caption = 'Keep old versions in _versions for this many days:'
+        Caption = 'Keep each day''s archive (ARCHIVE\MMDDYY) this many days:'
       end
       object EditKeepDays: TEdit
         Left = 500
@@ -260,7 +260,7 @@ object FrameSettings: TFrameSettings
         Top = 120
         Width = 480
         AutoSize = False
-        Caption = 'Remove the oldest versions when the drive is fuller than this %:'
+        Caption = 'Remove the oldest archives when the drive is fuller than this %:'
       end
       object EditMaxFull: TEdit
         Left = 500
@@ -287,6 +287,29 @@ object FrameSettings: TFrameSettings
         Anchors = [akTop, akLeft, akRight]
         AutoSize = False
         Caption = 'Otherwise the preview only shows when files would be deleted or moved.'
+      end
+      object CheckRecord: TCheckBox
+        Left = 12
+        Height = 19
+        Top = 216
+        Width = 570
+        Anchors = [akTop, akLeft, akRight]
+        Caption = 'Record checksums after each copy (needed for Verify drive, the .md5 files and move detection)'
+        Checked = True
+        State = cbChecked
+        TabOrder = 5
+      end
+      object LabelRecordNote: TLabel
+        Left = 31
+        Height = 45
+        Top = 238
+        Width = 551
+        Anchors = [akTop, akLeft, akRight]
+        AutoSize = False
+        Caption =
+          'Off: a copy ends sooner (on a first copy, much sooner), and Verify drive adds the missing checksums ' +
+          'later.'
+        WordWrap = True
       end
     end
     object TabEncryption: TTabSheet

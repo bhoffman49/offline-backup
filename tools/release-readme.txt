@@ -3,8 +3,8 @@ OFFLINE BACKUP
 
 Copies the folders you choose onto USB drives you keep unplugged ("offline"), so a
 ransomware attack, a failed disk or a bad mistake on your PC cannot reach them.
-Each drive remembers which folders it is for, and the app keeps old versions and
-checksums on the drive.
+Each drive remembers which folders it is for, and the app keeps an archive of
+replaced and deleted files and checksums on the drive.
 
 This is a beta. It has been tested well, but on few PCs - keep more than one backup.
 
@@ -46,15 +46,19 @@ moved files are moved on the drive, and the preview shows it all first.
 GOOD TO KNOW
 ------------
 - Nothing on the drive changes before you click Copy in the preview.
-- Files that would be overwritten or deleted are kept in _versions on the drive
-  first, for 90 days (Settings), or less when the drive gets full.
+- Files that would be overwritten or deleted are first kept in the day's archive
+  on the drive (ARCHIVE\MMDDYY, e.g. ARCHIVE\112326 for 23 Nov 2026), for 90 days
+  (Settings), or less when the drive gets full.
 - Drives > Verify drive reads every file back and checks it against the
   checksums taken when it was copied. MD5 check checks any .md5 file - each
-  backed-up folder has one next to it on the drive, readable by other tools too.
+  backed-up folder has one next to it on the drive, readable by other tools too -
+  and .sha1, .sha256, .sfv and other checksum lists.
+- Checksum Applet makes a checksum list for any folder, and if you like a small
+  checksum.exe next to it that checks the files on any PC, with nothing installed.
 - Each drive keeps its own folder list. Untick a folder to stop updating it;
-  Remove it to take its copy off the drive (into _versions).
-- Settings holds what is the same for every drive: starting folders, folders
-  never copied, the safety check, how long old versions are kept, the log file.
+  Remove it to take its copy off the drive (into the archive).
+- Settings holds what is the same for every drive: folders for new drives,
+  folders never copied, the safety check, how long archives are kept, the log file.
   Changes on the Drives and Settings pages wait until you click Save.
 - Encrypted drives: a drive encrypted with VeraCrypt (veracrypt.fr) works like any
   other once VeraCrypt has mounted it and it is named OFFLINE-x. The app never asks

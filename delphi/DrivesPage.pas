@@ -54,7 +54,7 @@ type
     FSettings: TBackupSettings;
     FInfo: TDriveInfo;
     FList: TBackupSourceArray;    // the folders being edited
-    FRemoved: TPathList;          // drive folders taken off the list (moved to _versions at the next copy)
+    FRemoved: TPathList;          // drive folders taken off the list (archived at the next copy)
     FSetUp: Boolean;
     FSavedState: string;          // StateText when shown or saved, to spot unsaved edits
     FLastIndex: Integer;
@@ -154,10 +154,13 @@ begin
     Exit;
   end;
   FSetUp := ReadDriveInfo(FDrives[ComboDrives.ItemIndex].Root, FInfo);
+  LabelHistory.Caption := 'Copies to this drive, newest first:';
   EditDescription.Text := FInfo.Description;
   if FSetUp then
   begin
-    if FInfo.HasList then LabelState.Caption := 'Set up ' + FInfo.Created + '.  Drive id ' + FInfo.Id
+    // the drive id is for telling drives apart (drives\<id>.ini on the PC) - shown with the history, not up top
+    LabelHistory.Caption := 'Copies to this drive, newest first (drive id ' + FInfo.Id + '):';
+    if FInfo.HasList then LabelState.Caption := 'Set up ' + Copy(FInfo.Created, 1, 10) + '.'
     else LabelState.Caption := 'Set up ' + FInfo.Created + ', but no folders chosen yet - add them and Save. Nothing is copied before that.';
     ButtonApply.Caption := 'Save';
     FList := Copy(FInfo.Sources);
@@ -188,7 +191,7 @@ begin
   FSavedState := StateText;
 end;
 
-{ One row per folder: [x] D:\MUSIC  to  D-mirror\MUSIC }
+{ One row per folder: [x] D:\MUSIC  to  D-mirror\MUSIC  kept (archive) }
 procedure TFrameDrives.ShowFolders;
 var
   I, Sel: Integer;
@@ -204,6 +207,7 @@ begin
       Item.Caption := FList[I].Path;
       Item.SubItems.Add('to');
       Item.SubItems.Add(MirrorFolder(FList[I]));
+      if FList[I].NoArchive then Item.SubItems.Add('off') else Item.SubItems.Add('kept');
       Item.Checked := FList[I].Enabled;
     end;
   finally
@@ -212,9 +216,10 @@ begin
   if Sel >= ListFolders.Items.Count then Sel := ListFolders.Items.Count - 1;
   if Sel >= 0 then ListFolders.ItemIndex := Sel;
   if Length(FRemoved) > 0 then
-    LabelFolderNote.Caption := IntToStr(Length(FRemoved)) + ' folder(s) taken off the list - moved to _versions at the next copy.'
+    LabelFolderNote.Caption := IntToStr(Length(FRemoved)) + ' folder(s) taken off the list - archived at the next copy.'
   else
-    LabelFolderNote.Caption := 'Unticked folders are not updated but stay on the drive. Remove takes a folder off the drive.';
+    LabelFolderNote.Caption := 'Unticked: left on the drive as it is. Remove: taken off the drive. Edit...: archive on ' +
+      'or off.';
   UpdateButtons;
 end;
 
@@ -257,7 +262,8 @@ begin
   ReadTicks;
   Result := Trim(EditDescription.Text) + #1;
   for I := 0 to High(FList) do
-    Result := Result + IntToStr(Ord(FList[I].Enabled)) + FList[I].Path + '|' + FList[I].Name + #1;
+    Result := Result + IntToStr(Ord(FList[I].Enabled)) + IntToStr(Ord(FList[I].NoArchive)) + FList[I].Path + '|' +
+      FList[I].Name + #1;
   for I := 0 to High(FRemoved) do Result := Result + FRemoved[I] + #2;
 end;
 
@@ -321,7 +327,7 @@ begin
       Inc(Added);
     end;
   if Added = 0 then
-    MessageDlg('All the starting folders ticked in Settings are already on the list.', mtInformation, [mbOK], 0);
+    MessageDlg('All the folders ticked under Settings > Folders for new drives are already on the list.', mtInformation, [mbOK], 0);
   ShowFolders;
 end;
 
@@ -334,7 +340,7 @@ begin
   if (I < 0) or not ButtonEditFolder.Enabled then Exit;
   ReadTicks;
   Old := MirrorFolder(FList[I]);
-  if not TFormSource.Execute(Self, FList, I) then Exit;
+  if not TFormSource.Execute(Self, FList, I, True) then Exit;
   // a new folder or name means a new copy on the drive; the old one goes the way of a removed folder
   if FSetUp and not SameText(Old, MirrorFolder(FList[I])) then
   begin
@@ -352,7 +358,7 @@ begin
   if I < 0 then Exit;
   ReadTicks;
   if FSetUp and (MessageDlg('Take ' + FList[I].Path + ' off this drive''s list?' + sLineBreak + sLineBreak +
-    'At the next copy its copy on the drive (' + MirrorFolder(FList[I]) + ') is moved to _versions, and cleared out ' +
+    'At the next copy its copy on the drive (' + MirrorFolder(FList[I]) + ') is moved to the day''s archive (ARCHIVE\MMDDYY), and cleared out ' +
     'after ' + IntToStr(FSettings.KeepVersionDays) + ' days (sooner if the drive gets full).' + sLineBreak + sLineBreak +
     'To keep it on the drive but stop updating it, untick it instead.', mtConfirmation, [mbYes, mbNo], 0) <> mrYes) then
     Exit;

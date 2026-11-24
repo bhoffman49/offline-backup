@@ -45,6 +45,7 @@ object FrameDrives: TFrameDrives
       Top = 158
       Width = 130
       Caption = 'Prepare a new drive...'
+      Visible = False
       Enabled = False
       TabOrder = 3
     end
@@ -173,7 +174,7 @@ object FrameDrives: TFrameDrives
           Top = 8
           Width = 170
           Anchors = [akTop, akRight]
-          Caption = 'Add starting folders'
+          Caption = 'Add folders from Settings'
           OnClick = ButtonStartingClick
           TabOrder = 3
         end
@@ -202,7 +203,7 @@ object FrameDrives: TFrameDrives
         Columns = <
           item
             Caption = 'Source'
-            Width = 260
+            Width = 230
           end
           item
             Caption = ''
@@ -210,7 +211,11 @@ object FrameDrives: TFrameDrives
           end
           item
             Caption = 'On the drive'
-            Width = 250
+            Width = 210
+          end
+          item
+            Caption = 'Archive'
+            Width = 85
           end>
         HideSelection = False
         ReadOnly = True

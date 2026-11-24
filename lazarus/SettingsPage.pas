@@ -1,6 +1,6 @@
 unit SettingsPage;
 
-{ Settings area of the Lazarus/LCL main window: the starting folders, the folders never copied, the safety limits,
+{ Settings area of the Lazarus/LCL main window: the folders for new drives, the folders never copied, the safety limits,
   VeraCrypt and the log file. Changes wait for Save; the main window keeps and writes the settings.
   The Delphi edition has the same page in ..\delphi\SettingsPage.pas. }
 
@@ -45,6 +45,8 @@ type
     EditMaxFull: TEdit;
     CheckPreview: TCheckBox;
     LabelPreviewNote: TLabel;
+    CheckRecord: TCheckBox;
+    LabelRecordNote: TLabel;
     TabEncryption: TTabSheet;
     CheckDismount: TCheckBox;
     LabelDismountNote: TLabel;
@@ -116,6 +118,7 @@ begin
   EditMaxFull.Text := IntToStr(Settings.MaxDriveFullPct);
   EditLogFile.Text := Settings.LogFile;
   CheckPreview.Checked := Settings.PreviewAlways;
+  CheckRecord.Checked := Settings.RecordChecksums;
   CheckDismount.Checked := Settings.DismountAfterCopy;
   Exe := FindVeraCrypt(Settings.VeraCryptExe);
   if Exe <> '' then LabelVeraCrypt.Caption := 'VeraCrypt found: ' + Exe
@@ -197,7 +200,7 @@ begin
       FSettings.Sources[I].Name + #1;
   Result := Result + #2 + ListExclude.Items.Text + #2 + Trim(EditBrakePct.Text) + #1 + Trim(EditBrakeMin.Text) + #1 +
     Trim(EditKeepDays.Text) + #1 + Trim(EditMaxFull.Text) + #1 + Trim(EditLogFile.Text) + #1 +
-    IntToStr(Ord(CheckPreview.Checked)) + IntToStr(Ord(CheckDismount.Checked));
+    IntToStr(Ord(CheckPreview.Checked)) + IntToStr(Ord(CheckDismount.Checked)) + IntToStr(Ord(CheckRecord.Checked));
 end;
 
 function TFrameSettings.Modified: Boolean;
@@ -269,8 +272,8 @@ var
 begin
   I := ListSources.ItemIndex;
   if I < 0 then Exit;
-  if MessageDlg('Remove ' + FSettings.Sources[I].Path + ' from the starting folders?' + sLineBreak + sLineBreak +
-    'Drives already set up keep it on their own list - this only changes what Add starting folders offers.',
+  if MessageDlg('Remove ' + FSettings.Sources[I].Path + ' from the folders for new drives?' + sLineBreak + sLineBreak +
+    'Drives already set up keep it on their own list - this only changes what Add folders from Settings offers.',
     mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
   ReadTicks;
   Delete(FSettings.Sources, I, 1);
@@ -343,7 +346,7 @@ begin
   // same limits as LoadSettings
   if not ReadNumber(EditBrakePct, 1, 100, 'The safety check percentage', S.BrakePercent) then Exit;
   if not ReadNumber(EditBrakeMin, 1, 10000000, 'The safety check number of files', S.BrakeMinFiles) then Exit;
-  if not ReadNumber(EditKeepDays, 1, 36500, 'The days to keep old versions', S.KeepVersionDays) then Exit;
+  if not ReadNumber(EditKeepDays, 1, 36500, 'The days to keep an archive', S.KeepVersionDays) then Exit;
   if not ReadNumber(EditMaxFull, 10, 100, 'The drive full percentage', S.MaxDriveFullPct) then Exit;
   if Trim(EditLogFile.Text) = '' then
   begin
@@ -353,6 +356,7 @@ begin
   end;
   S.LogFile := Trim(EditLogFile.Text);
   S.PreviewAlways := CheckPreview.Checked;
+  S.RecordChecksums := CheckRecord.Checked;
   S.DismountAfterCopy := CheckDismount.Checked;
   ReadTicks;
   S.Sources := Copy(FSettings.Sources);

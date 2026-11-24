@@ -33,7 +33,7 @@ object FormPreview: TFormPreview
   end
   object LabelWarning: TLabel
     Left = 12
-    Height = 34
+    Height = 50
     Top = 54
     Width = 836
     Anchors = [akTop, akLeft, akRight]
@@ -46,8 +46,8 @@ object FormPreview: TFormPreview
   end
   object ListSummary: TListView
     Left = 12
-    Height = 196
-    Top = 92
+    Height = 180
+    Top = 108
     Width = 836
     Anchors = [akTop, akLeft, akRight]
     Columns = <

@@ -10,16 +10,20 @@ unit OfflineEngine;
     1. dry run   - robocopy /L lists what would be new, changed or deleted on the offline drive; a new file that is
                    a deleted one moved (same size, time and checksum) becomes a move, done on the drive in place
     2. brake     - if a large share of existing files would be changed or deleted, asks before touching the drive
-    3. versions  - files about to be overwritten or deleted are first moved to <drive>\_versions\<date-time>\,
-                   under the same path they have on the drive (G-mirror\Backups\...)
+    3. archive   - files about to be overwritten or deleted are first moved to the day's archive,
+                   <drive>\ARCHIVE\MMDDYY\ (ARCHIVE\112326 = 23 Nov 2026), under the same path they have on the drive
+                   (G-mirror\Backups\...); a file already archived that day stays as it was archived first
     4. copy      - robocopy mirror, progress read from its log as it goes
-    5. prune     - versions older than KeepVersionDays are removed, then the oldest until the drive is at most
+    5. prune     - archives older than KeepVersionDays are removed, then the oldest until the drive is at most
                    MaxDriveFullPct full
+  Drives used by 0.10 and older have <drive>\_versions\<yyyy-mm-dd_hhnn>\ instead (and test builds of 0.11 made
+  <drive>\Archive_MMDDYY\); each such set is moved into the archive of its day at the next copy.
   Each copied file's CRC32 and MD5 are recorded in <drive>\_checksums\<letter>-mirror\<name>.crc (taken from the
   source just after the copy), and the MD5s also go to <drive>\<letter>-mirror\<name>.md5 in the usual
   "md5 *path" format, so other tools (ExactFile, md5sum) can check the drive too. Verify re-reads every file on the
   drive, past the Windows cache, and compares - so a drive that has sat in a drawer can be checked without the PC's
-  folders. CheckMd5 checks the files listed in any .md5 file.
+  folders. CheckMd5 checks the files listed in any .md5 file - or any other checksum list Digests can read (.sha1,
+  .sha256, .sfv, ...), using the algorithms in Hashes.
 
   No UI code in here: the forms hook the events of TOfflineCopyThread, which runs them on the main thread. }
 
@@ -28,7 +32,7 @@ unit OfflineEngine;
 interface
 
 uses
-  Windows, SysUtils, Classes;
+  Windows, SysUtils, Classes, Hashes, Digests;
 
 type
   // plain string arrays rather than TStringList: under Free Pascal TStringList is AnsiString and would
@@ -39,6 +43,10 @@ type
     Name: string;                // folder name on the drive, under <letter>-mirror\
     Path: string;                // 'D:\MUSIC' - any local drive
     Enabled: Boolean;            // ticked in the list; unticked sources are left alone on the drive
+    // this folder's changed and deleted files are NOT archived (ARCHIVE\MMDDYY): the copy replaces and deletes them
+    // on the drive straight away. False by default, so a source made anywhere is archived. Only a drive's own
+    // folder list sets it (Drives > Edit...).
+    NoArchive: Boolean;
   end;
   TBackupSourceArray = array of TBackupSource;
 
@@ -47,7 +55,7 @@ type
     Exclude: TPathList;          // folder names or full paths for robocopy /XD (*.partial is always excluded)
     BrakePercent: Integer;       // ask first if more than this % of a folder's files would be changed or deleted ...
     BrakeMinFiles: Integer;      // ... and at least this many files
-    KeepVersionDays: Integer;
+    KeepVersionDays: Integer;    // days an ARCHIVE\MMDDYY folder is kept (the INI key keeps its old name)
     MaxDriveFullPct: Integer;
     LogFile: string;
     // show the preview before every copy; False: only when something would be deleted from the drive
@@ -88,7 +96,7 @@ type
     // HasList False (a map from before drives had their own lists): nothing is copied until folders are chosen
     HasList: Boolean;
     Sources: TBackupSourceArray;
-    Removed: TPathList;          // drive folders taken off the list ('D-mirror\MUSIC'): moved to _versions at the next copy
+    Removed: TPathList;          // drive folders taken off the list ('D-mirror\MUSIC'): archived at the next copy
     Runs: array of TDriveRun;    // oldest first, at most MaxDriveRuns
   end;
 
@@ -106,6 +114,7 @@ type
     Drive: string;               // 'OFFLINE-D (H:)'
     Items: TPreviewItems;
     Warning: string;             // safety check: folders with an unusually large share changed or deleted, '' if none
+    NoArchive: string;           // folders with the archive switched off that have files to replace or delete
   end;
 
   TCopyPlan = class
@@ -198,7 +207,9 @@ type
     FDismounted: Boolean;
     FChecksumsSkipped: Boolean;  // RecordChecksums is off and files were copied without one
     function DoRun: TCopyResult;
-    procedure MoveRemovedFolders(const Stamp: string);
+    procedure MoveRemovedFolders(const Archive: string);
+    procedure MoveOldVersions;
+    procedure MoveRootArchives;
     procedure SaveHistory(R: TCopyResult);
     procedure Report;
     function DriveTag: string;
@@ -206,8 +217,8 @@ type
     function RoboArgs(const Src, Dest: string): string;
     function GetCopyPlan(const Src, Dest: string): TCopyPlan;
     function NeedsConfirmation(Plan: TCopyPlan): Boolean;
-    procedure SaveVersions(Plan: TCopyPlan; const Folder, Dest, Stamp: string; out Moved, Failed: Integer);
-    function RemoveOldVersions: Integer;
+    procedure ArchiveFiles(Plan: TCopyPlan; const Folder, Dest, Archive: string; out Moved, Failed: Integer);
+    function PruneArchives: Integer;
     function CopyWithProgress(const Name, Src, Dest: string; Plan: TCopyPlan): Integer;
     function CheckTarget: Boolean;
     procedure RecordChecksums(const Folder, Src, Dest: string; Plan: TCopyPlan);
@@ -220,6 +231,7 @@ type
     AllowFolderTarget: Boolean;  // tests only: lets Drive be a plain folder instead of an OFFLINE-x drive
     AssumeYes: Boolean;          // skip the brake question (like the script's -Yes)
     CheckItems: TCheckItems;     // filled by CheckMd5
+    CheckAlgo: THashAlgo;        // ... and the algorithm of the list it checked
     // why a run ended crSkipped, in a few words for the end-of-run window; NothingChosen: all folders unticked,
     // which is the user's choice and not a problem
     SkipReason: string;
@@ -230,6 +242,7 @@ type
     // one. crOk: all fine, crFailed: bad or unreadable files (listed in the log)
     function Verify: TCopyResult;
     // checks every file listed in an .md5 file (paths relative to the file's folder); results in CheckItems.
+    // Other checksum lists too (.sha1, .sha256, .sfv, ... - see Digests.ListAlgorithm), with their algorithm.
     // crOk: all match, crFailed: something bad, missing or unreadable. Works anywhere - no OFFLINE drive needed.
     function CheckMd5(const FileName: string): TCopyResult;
     procedure Cancel;            // safe to call from another thread
@@ -290,8 +303,14 @@ type
   end;
 
 function PreviewKindText(K: TPreviewKind): string;   // 'Files to add', ...
+// the red text at the top of the preview: the safety check and/or the folders that are not archived; '' if neither
+function PreviewWarningText(const P: TCopyPreview): string;
+// the day's archive folder on a drive: 'ARCHIVE\112326' for 23 Nov 2026 (month, day, year)
+function ArchiveFolderName(When: TDateTime): string;
+// is this the name of a day's folder in ARCHIVE ('112326')? When: its day
+function IsArchiveName(const S: string; out When: TDateTime): Boolean;
 const
-  AppVersion = '0.10.0';         // shown in the window title; make-release.cmd reads it from this line
+  AppVersion = '0.11.0';         // shown in the window title; make-release.cmd reads it from this line
 
 function DefaultSettings: TBackupSettings;
 // settings file: OfflineBackup.ini next to the exe (each edition has its own), or in %APPDATA%\OfflineBackup\
@@ -350,7 +369,9 @@ implementation
 
 const
   kernel32 = 'kernel32.dll';
-  VersionsDir = '_versions';
+  OldVersionsDir = '_versions';  // 0.10 and older: <drive>\_versions\<yyyy-mm-dd_hhnn>\ - moved into the archives
+  ArchiveDir = 'ARCHIVE';         // <drive>\ARCHIVE\<MMDDYY>\ - one folder per day
+  OldArchivePrefix = 'Archive_';  // test builds of 0.11 had <drive>\Archive_MMDDYY\ - moved into ARCHIVE
   ChecksumDir = '_checksums';
   GB = 1024.0 * 1024.0 * 1024.0;
 
@@ -416,6 +437,53 @@ const
     'Folders to add', 'Folders to delete', 'Backup folders to take off the drive');
 begin
   Result := Names[K];
+end;
+
+function PreviewWarningText(const P: TCopyPreview): string;
+begin
+  Result := '';
+  if P.Warning <> '' then
+  begin
+    Result := 'Safety check: an unusually large share of the files in ' + P.Warning + ' would be changed or ' +
+      'deleted. That can mean something went wrong on the source (ransomware, a deleted folder, a bad restore).';
+    if P.NoArchive = '' then Result := Result + ' If you go ahead, the old files are kept in the archive.';
+  end;
+  if P.NoArchive <> '' then
+  begin
+    if Result <> '' then Result := Result + ' ';
+    Result := Result + 'The archive is off for ' + P.NoArchive + ': changed and deleted files there are ' +
+      'replaced and deleted on the drive straight away, with no copy in the archive.';
+  end;
+end;
+
+function ArchiveFolderName(When: TDateTime): string;
+var
+  Y, M, D: Word;
+begin
+  DecodeDate(When, Y, M, D);
+  Result := ArchiveDir + '\' + Format('%.2d%.2d%.2d', [M, D, Y mod 100]);
+end;
+
+function IsArchiveName(const S: string; out When: TDateTime): Boolean;
+var
+  M, D, Y, I: Integer;
+begin
+  Result := False;
+  When := 0;
+  if Length(S) <> 6 then Exit;
+  for I := 1 to 6 do
+    if not CharInSet(S[I], ['0'..'9']) then Exit;
+  M := StrToInt(Copy(S, 1, 2));
+  D := StrToInt(Copy(S, 3, 2));
+  Y := 2000 + StrToInt(Copy(S, 5, 2));
+  Result := TryEncodeDate(Y, M, D, When);
+end;
+
+{ 'Archive_112326' - a day's archive as the 0.11 test builds named it, in the drive's root }
+function IsOldArchiveName(const S: string; out When: TDateTime): Boolean;
+begin
+  Result := SameText(Copy(S, 1, Length(OldArchivePrefix)), OldArchivePrefix) and
+    IsArchiveName(Copy(S, Length(OldArchivePrefix) + 1, MaxInt), When);
 end;
 
 function IsOfflineLabel(const S: string): Boolean;
@@ -1080,7 +1148,8 @@ begin
   Info.VolLabel := IniStr(E, 'Drive', 'Label', '');
   Info.Description := IniStr(E, 'Drive', 'Description', '');
   Info.Created := IniStr(E, 'Drive', 'Created', '');
-  // [Folders] Count=N, FolderN = ticked (1/0)|source path|name on the drive
+  // [Folders] Count=N, FolderN = ticked (1/0)|source path|name on the drive|archived (1/0)
+  // (the last field is new in 0.11: without it the folder is archived; 0.10 and older ignore it)
   Info.HasList := IniHas(E, 'Folders', 'Count');
   Count := IniInt(E, 'Folders', 'Count', 0, 0, 1000);
   for I := 1 to Count do
@@ -1095,6 +1164,7 @@ begin
     end;
     if Length(Parts) < 3 then Continue;
     Src.Enabled := Parts[0] <> '0';
+    Src.NoArchive := (Length(Parts) >= 4) and (Trim(Parts[3]) = '0');
     Src.Path := NormalizeSourcePath(Parts[1]);
     if SourceLetter(Src.Path) = #0 then Continue;
     Src.Name := Parts[2];
@@ -1146,12 +1216,13 @@ begin
       'Count=' + IntToStr(Length(Info.Sources)) + #13#10;
     for I := 0 to High(Info.Sources) do
       Result := Result + 'Folder' + IntToStr(I + 1) + '=' + IntToStr(Ord(Info.Sources[I].Enabled)) + '|' +
-        OneLine(Info.Sources[I].Path) + '|' + OneLine(Info.Sources[I].Name) + #13#10;
+        OneLine(Info.Sources[I].Path) + '|' + OneLine(Info.Sources[I].Name) + '|' +
+        IntToStr(Ord(not Info.Sources[I].NoArchive)) + #13#10;
   end;
   if Length(Info.Removed) > 0 then
   begin
     Result := Result + #13#10'[Remove]'#13#10 +
-      '; taken off the list - moved to _versions at the next copy'#13#10;
+      '; taken off the list - archived at the next copy'#13#10;
     for I := 0 to High(Info.Removed) do
       Result := Result + 'Folder' + IntToStr(I + 1) + '=' + OneLine(Info.Removed[I]) + #13#10;
   end;
@@ -1431,6 +1502,44 @@ begin
     Md5 := Md5Final(M);
     Result := True;
   finally
+    VirtualFree(Buf, 0, MEM_RELEASE);
+    CloseHandle(H);
+  end;
+end;
+
+{ Any algorithm's checksum of a file (Hashes), read like FileSums. MD5 lists are checked with FileSums, which is
+  quicker; this is for the others. }
+function FileDigest(const Path: string; Algo: THashAlgo; NoCache: Boolean; out D: TDigest; Progress: TBytesEvent;
+  Cancel: PBoolean): Boolean;
+var
+  H: THandle;
+  Buf: Pointer;
+  Got: DWORD;
+  Flags: DWORD;
+  Hasher: THasher;
+begin
+  Result := False;
+  D.Len := 0;
+  Flags := FILE_FLAG_SEQUENTIAL_SCAN;
+  if NoCache then Flags := Flags or FILE_FLAG_NO_BUFFERING;
+  H := CreateFileW(PWideChar(Path), GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, Flags, 0);
+  if H = INVALID_HANDLE_VALUE then Exit;
+  Buf := VirtualAlloc(nil, CrcBufSize, MEM_COMMIT, PAGE_READWRITE);
+  Hasher := NewHasher(Algo);
+  try
+    repeat
+      if (Cancel <> nil) and Cancel^ then Exit;
+      if not ReadFile(H, Buf^, CrcBufSize, Got, nil) then Exit;
+      if Got > 0 then
+      begin
+        Hasher.Update(Buf, Got);
+        if Assigned(Progress) then Progress(Got);
+      end;
+    until Got = 0;
+    Hasher.Final(D);
+    Result := True;
+  finally
+    Hasher.Free;
     VirtualFree(Buf, 0, MEM_RELEASE);
     CloseHandle(H);
   end;
@@ -1978,19 +2087,53 @@ begin
   Result := (Risky >= FSettings.BrakeMinFiles) and (100.0 * Risky / Existing > FSettings.BrakePercent);
 end;
 
-{ Move everything the copy would overwrite or delete into <drive>\_versions\<stamp>\<folder>\..., keeping its path.
-  Folder is the source's place on the drive (G-mirror\Backups); sets made before sources had drive letters
-  have just the name (Backups). }
-procedure TOfflineCopy.SaveVersions(Plan: TCopyPlan; const Folder, Dest, Stamp: string; out Moved, Failed: Integer);
+{ Moves Src (a file or a folder) to Dst. What Dst already has stays as it is - the day's archive keeps what was
+  archived first that day - and a folder is merged into one that is there already. Moved counts what was moved.
+  True if Src is gone afterwards. }
+function MergeMove(const Src, Dst: string; var Moved: Integer): Boolean;
 var
-  VerRoot, DestRoot, Path, Target: string;
+  H: THandle;
+  FD: TWin32FindDataW;
+  Names: TPathList;
+  Name: string;
+  I: Integer;
+begin
+  if not PathExists(Dst) then
+  begin
+    MakeDirs(ParentDir(Dst));
+    Result := MoveFileExW(PWideChar(Src), PWideChar(Dst), 0);
+    if Result then Inc(Moved);
+    Exit;
+  end;
+  Result := False;
+  if not (IsDir(Src) and IsDir(Dst)) then Exit;     // already in the archive: that one stays
+  Names := nil;
+  H := FindFirstFileW(PWideChar(Src + '\*'), FD);
+  if H <> INVALID_HANDLE_VALUE then
+  try
+    repeat
+      Name := string(FD.cFileName);
+      if (Name <> '.') and (Name <> '..') then AddPath(Names, Name);
+    until not FindNextFileW(H, FD);
+  finally
+    Windows.FindClose(H);
+  end;
+  for I := 0 to High(Names) do MergeMove(Src + '\' + Names[I], Dst + '\' + Names[I], Moved);
+  Result := RemoveDirectoryW(PWideChar(Src));
+end;
+
+{ Move everything the copy would overwrite or delete into the day's archive, <drive>\<Archive>\<folder>\..., keeping
+  its path. Folder is the source's place on the drive (G-mirror\Backups). A file already archived today is left
+  where it is - the copy then replaces or deletes it, and the archive keeps the day's first copy. }
+procedure TOfflineCopy.ArchiveFiles(Plan: TCopyPlan; const Folder, Dest, Archive: string; out Moved, Failed: Integer);
+var
+  ArcRoot, DestRoot, Path, Target: string;
   All: TPathList;
   I: Integer;
-  Flags: DWORD;
 begin
   Moved := 0;
   Failed := 0;
-  VerRoot := FDrive + VersionsDir + '\' + Stamp + '\' + Folder;
+  ArcRoot := FDrive + Archive + '\' + Folder;
   DestRoot := NoTrailingSlash(Dest);
   All := nil;
   for I := 0 to High(Plan.Overwrite) do AddPath(All, Plan.Overwrite[I]);
@@ -2006,14 +2149,12 @@ begin
       Inc(Failed);
       Continue;
     end;
-    Target := VerRoot + Copy(Path, Length(DestRoot) + 1, MaxInt);
-    // a deleted folder that is empty by now (its files moved elsewhere on the drive, or already put in _versions
-    // just above): nothing in it to keep, so it is simply removed - not counted as an old version
+    Target := ArcRoot + Copy(Path, Length(DestRoot) + 1, MaxInt);
+    // a deleted folder that is empty by now (its files moved elsewhere on the drive, or already archived just
+    // above): nothing in it to keep, so it is simply removed - not counted
     if IsDir(Path) and RemoveDirectoryW(PWideChar(Path)) then Continue;
-    MakeDirs(ParentDir(Target));
-    Flags := 0;
-    if not IsDir(Path) then Flags := MOVEFILE_REPLACE_EXISTING;
-    if MoveFileExW(PWideChar(Path), PWideChar(Target), Flags) then Inc(Moved) else Inc(Failed);
+    if not IsDir(Path) and PathExists(Target) then Continue;   // archived earlier today: that copy stays
+    if not MergeMove(Path, Target, Moved) and not PathExists(Target) then Inc(Failed);
   end;
 end;
 
@@ -2029,21 +2170,110 @@ begin
   if Result then When := When + EncodeTime(H, Mi, 0, 0);
 end;
 
-{ Remove versions older than KeepVersionDays, then the oldest until the drive is at most MaxDriveFullPct full }
-function TOfflineCopy.RemoveOldVersions: Integer;
+{ Remove archives older than KeepVersionDays, then the oldest until the drive is at most MaxDriveFullPct full (the
+  newest is always kept). Sets still in a 0.10 _versions folder or a root Archive_MMDDYY (if moving them failed)
+  are pruned the same way. }
+function TOfflineCopy.PruneArchives: Integer;
 var
-  Root: string;
-  Sets, Kept: TPathList;
+  Paths, Kept: TPathList;
+  Whens, KeptWhens: array of TDateTime;
   H: THandle;
   FD: TWin32FindDataW;
-  When: TDateTime;
+  When, TW: TDateTime;
   FreeBytes: Int64;
   I, J: Integer;
   T: string;
+
+  // Kind 0: ARCHIVE\<day>, 1: an old _versions set, 2: an Archive_<day> in the root (0.11 test builds)
+  procedure Collect(const Dir: string; Kind: Integer);
+  var
+    Name: string;
+    Ok: Boolean;
+  begin
+    H := FindFirstFileW(PWideChar(Dir + '*'), FD);
+    if H = INVALID_HANDLE_VALUE then Exit;
+    try
+      repeat
+        Name := string(FD.cFileName);
+        case Kind of
+          0: Ok := IsArchiveName(Name, When);
+          1: Ok := IsStampName(Name, When);
+        else
+          Ok := IsOldArchiveName(Name, When);
+        end;
+        if (FD.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY <> 0) and Ok then
+        begin
+          AddPath(Paths, Dir + string(FD.cFileName));
+          SetLength(Whens, Length(Whens) + 1);
+          Whens[High(Whens)] := When;
+        end;
+      until not FindNextFileW(H, FD);
+    finally
+      Windows.FindClose(H);
+    end;
+  end;
+
 begin
   Result := 0;
-  Root := FDrive + VersionsDir;
-  if not IsDir(Root) then Exit;
+  Paths := nil;
+  Whens := nil;
+  if IsDir(FDrive + ArchiveDir) then Collect(FDrive + ArchiveDir + '\', 0);
+  if IsDir(FDrive + OldVersionsDir) then Collect(FDrive + OldVersionsDir + '\', 1);
+  Collect(FDrive, 2);
+  // oldest first
+  for I := 1 to High(Paths) do
+  begin
+    T := Paths[I];
+    TW := Whens[I];
+    J := I - 1;
+    while (J >= 0) and (Whens[J] > TW) do
+    begin
+      Paths[J + 1] := Paths[J];
+      Whens[J + 1] := Whens[J];
+      Dec(J);
+    end;
+    Paths[J + 1] := T;
+    Whens[J + 1] := TW;
+  end;
+  Kept := nil;
+  KeptWhens := nil;
+  for I := 0 to High(Paths) do
+    if Whens[I] < Now - FSettings.KeepVersionDays then
+    begin
+      DeleteTree(Paths[I]);
+      Inc(Result);
+    end
+    else
+      AddPath(Kept, Paths[I]);
+  I := 0;
+  while (Length(Kept) - I > 1) and (VolumeUsedPct(FDrive, FreeBytes) > FSettings.MaxDriveFullPct) do
+  begin
+    DeleteTree(Kept[I]);
+    Inc(Result);
+    Inc(I);
+  end;
+  if IsDir(FDrive + OldVersionsDir) then RemoveDirectoryW(PWideChar(FDrive + OldVersionsDir));   // if empty now
+end;
+
+{ Drives used by 0.10 and older keep old versions in <drive>\_versions\<yyyy-mm-dd_hhnn>\. Each such set is moved
+  into the archive of its day, oldest first (so the day's first copy of a file is the one kept), then _versions goes
+  if it is empty. Runs after the preview and safety check, like everything that changes the drive. }
+procedure TOfflineCopy.MoveOldVersions;
+var
+  Root: string;
+  Sets: TPathList;
+  H: THandle;
+  FD: TWin32FindDataW;
+  When: TDateTime;
+  I, J, Moved, Done: Integer;
+  T: string;
+begin
+  Root := FDrive + OldVersionsDir;
+  if not IsDir(Root) then
+  begin
+    MoveRootArchives;
+    Exit;
+  end;
   Sets := nil;
   H := FindFirstFileW(PWideChar(Root + '\*'), FD);
   if H <> INVALID_HANDLE_VALUE then
@@ -2055,7 +2285,7 @@ begin
   finally
     Windows.FindClose(H);
   end;
-  // oldest first (the names sort by date)
+  // oldest first (these names sort by date)
   for I := 1 to High(Sets) do
   begin
     T := Sets[I];
@@ -2067,22 +2297,58 @@ begin
     end;
     Sets[J + 1] := T;
   end;
-  Kept := nil;
+  Done := 0;
   for I := 0 to High(Sets) do
-    if IsStampName(Sets[I], When) and (When < Now - FSettings.KeepVersionDays) then
-    begin
-      DeleteTree(Root + '\' + Sets[I]);
-      Inc(Result);
-    end
-    else
-      AddPath(Kept, Sets[I]);
-  I := 0;
-  while (Length(Kept) - I > 1) and (VolumeUsedPct(FDrive, FreeBytes) > FSettings.MaxDriveFullPct) do
   begin
-    DeleteTree(Root + '\' + Kept[I]);
-    Inc(Result);
-    Inc(I);
+    IsStampName(Sets[I], When);
+    Moved := 0;
+    MergeMove(Root + '\' + Sets[I], FDrive + ArchiveFolderName(When), Moved);
+    // what is left was already in that day's archive from an earlier set
+    if IsDir(Root + '\' + Sets[I]) and IsDir(FDrive + ArchiveFolderName(When)) then DeleteTree(Root + '\' + Sets[I]);
+    if not IsDir(Root + '\' + Sets[I]) then Inc(Done)
+    else Log('  ' + OldVersionsDir + '\' + Sets[I] + ': could not be moved into ' + ArchiveFolderName(When) +
+      ' - tried again next time');
   end;
+  RemoveDirectoryW(PWideChar(Root));     // only if it is empty now
+  if Done > 0 then
+    Log('  moved ' + IntToStr(Done) + ' old ' + OldVersionsDir + ' set(s) into ' + ArchiveDir + ', by day');
+  MoveRootArchives;
+end;
+
+{ The 0.11 test builds put each day's archive in the drive's root as Archive_MMDDYY: moved into ARCHIVE\MMDDYY
+  (merged; what is there already stays). }
+procedure TOfflineCopy.MoveRootArchives;
+var
+  Names: TPathList;
+  H: THandle;
+  FD: TWin32FindDataW;
+  When: TDateTime;
+  I, Moved, Done: Integer;
+  Target: string;
+begin
+  Names := nil;
+  H := FindFirstFileW(PWideChar(FDrive + OldArchivePrefix + '*'), FD);
+  if H <> INVALID_HANDLE_VALUE then
+  try
+    repeat
+      if (FD.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY <> 0) and IsOldArchiveName(string(FD.cFileName), When) then
+        AddPath(Names, string(FD.cFileName));
+    until not FindNextFileW(H, FD);
+  finally
+    Windows.FindClose(H);
+  end;
+  Done := 0;
+  for I := 0 to High(Names) do
+  begin
+    IsOldArchiveName(Names[I], When);
+    Target := FDrive + ArchiveFolderName(When);
+    Moved := 0;
+    MergeMove(FDrive + Names[I], Target, Moved);
+    if IsDir(FDrive + Names[I]) and IsDir(Target) then DeleteTree(FDrive + Names[I]);
+    if not IsDir(FDrive + Names[I]) then Inc(Done)
+    else Log('  ' + Names[I] + ': could not be moved into ' + ArchiveFolderName(When) + ' - tried again next time');
+  end;
+  if Done > 0 then Log('  moved ' + IntToStr(Done) + ' Archive_ folder(s) into ' + ArchiveDir + ', by day');
 end;
 
 const
@@ -2255,13 +2521,14 @@ begin
   DeleteFileW(PWideChar(RunLog));
 end;
 
-{ Folders taken off the drive's list: their copy on the drive is moved to _versions\<stamp>\<letter>-mirror\<name>,
-  where the usual pruning removes it later. Runs only after the dry run and brake have passed. }
-procedure TOfflineCopy.MoveRemovedFolders(const Stamp: string);
+{ Folders taken off the drive's list: their copy on the drive is moved to the day's archive,
+  <Archive>\<letter>-mirror\<name>, where the usual pruning removes it later. Runs only after the dry run and brake
+  have passed. }
+procedure TOfflineCopy.MoveRemovedFolders(const Archive: string);
 var
   Left: TPathList;
   R, Target: string;
-  I, J, P: Integer;
+  I, J, P, Moved: Integer;
   OnList: Boolean;
 begin
   Left := nil;
@@ -2282,17 +2549,20 @@ begin
       if SameText(MirrorFolder(FList[J]), R) then OnList := True;
     if OnList then Continue;
     if not IsDir(FDrive + R) then Continue;     // already gone
-    Target := FDrive + VersionsDir + '\' + Stamp + '\' + R;
-    MakeDirs(ParentDir(Target));
-    if MoveFileExW(PWideChar(FDrive + R), PWideChar(Target), 0) then
+    Target := FDrive + Archive + '\' + R;
+    Moved := 0;
+    MergeMove(FDrive + R, Target, Moved);
+    // what is left was archived earlier today already (that copy stays)
+    if IsDir(FDrive + R) and IsDir(Target) then DeleteTree(FDrive + R);
+    if not IsDir(FDrive + R) then
     begin
       DeleteFileW(PWideChar(FDrive + ChecksumDir + '\' + R + '.crc'));
       DeleteFileW(PWideChar(FDrive + R + '.md5'));
-      Log('  ' + R + ': taken off this drive''s list - moved to _versions\' + Stamp);
+      Log('  ' + R + ': taken off this drive''s list - moved to ' + Archive);
     end
     else
     begin
-      Log('  ' + R + ': taken off this drive''s list, but could not be moved to _versions - tried again next time');
+      Log('  ' + R + ': taken off this drive''s list, but could not be moved to ' + Archive + ' - tried again next time');
       AddPath(Left, FInfo.Removed[I]);
     end;
   end;
@@ -2425,7 +2695,7 @@ begin
 end;
 
 { Carries out the moves FindMoves found: each file is moved on the drive (instantly, same volume) and its recorded
-  checksum goes with it. A move that fails puts the old copy back on the delete list, so it is kept in _versions
+  checksum goes with it. A move that fails puts the old copy back on the delete list, so it is archived
   and robocopy copies the file as a new one - nothing is lost either way. }
 procedure TOfflineCopy.DoMoves(const Src: TBackupSource; Plan: TCopyPlan);
 var
@@ -2883,22 +3153,13 @@ end;
 
 function TOfflineCopy.CheckMd5(const FileName: string): TCopyResult;
 var
-  Lines: TPathList;
-  Want: TPathList;                 // the MD5 of each item, same order as CheckItems
-  Base, S, Path, Md5: string;
+  Entries: TDigestEntries;         // the list's lines: the checksum of each item, same order as CheckItems
+  Text, Base, Path, Md5: string;
   Crc: Cardinal;
+  D: TDigest;
   Size, Time: Int64;
-  I, P, Bad, Missing: Integer;
-
-  function IsHex32(const H: string): Boolean;
-  var
-    K: Integer;
-  begin
-    Result := Length(H) = 32;
-    for K := 1 to Length(H) do
-      if not CharInSet(H[K], ['0'..'9', 'a'..'f', 'A'..'F']) then Result := False;
-  end;
-
+  I, Bad, Missing: Integer;
+  Read, Match: Boolean;
 begin
   Result := crFailed;
   CheckItems := nil;
@@ -2915,22 +3176,19 @@ begin
       Exit;
     end;
     Base := ParentDir(FileName) + '\';
-    Lines := SplitLines(ReadTextFile(FileName));
-    // "md5 *path" (binary, what ExactFile and we write) or "md5  path" (md5sum text mode); ; and # are comments
-    Want := nil;
-    for I := 0 to High(Lines) do
+    Text := ReadTextFile(FileName);
+    // the algorithm from the extension (.md5, .sha256, .sfv, ...) or an fsum header
+    if not ListAlgorithm(FileName, Text, CheckAlgo) then
     begin
-      S := Trim(Lines[I]);
-      if (S = '') or CharInSet(S[1], [';', '#']) then Continue;
-      P := System.Pos(' ', S);
-      if (P <> 33) or not IsHex32(Copy(S, 1, 32)) then Continue;
-      Path := TrimLeft(Copy(S, 34, MaxInt));
-      if (Path <> '') and (Path[1] = '*') then Delete(Path, 1, 1);
-      if Path = '' then Continue;
-      SetLength(CheckItems, Length(CheckItems) + 1);
-      CheckItems[High(CheckItems)].Path := Path;
-      AddPath(Want, LowerCase(Copy(S, 1, 32)));
+      Log(ExtractFileName(FileName) + ': not a checksum list this app knows (.md5, .sha1, .sha256, .sfv, ...)');
+      Exit;
     end;
+    // "md5 *path" (binary, what ExactFile and we write), "md5  path" (md5sum text mode), BSD "MD5 (path) = md5" and
+    // SFV "path crc" lines; ; and # are comments
+    ParseDigest(Text, CheckAlgo, Entries);
+    SetLength(CheckItems, Length(Entries));
+    for I := 0 to High(Entries) do
+      CheckItems[I].Path := Entries[I].Name;
     FProgress.FilesTotal := Length(CheckItems);
     for I := 0 to High(CheckItems) do
     begin
@@ -2962,6 +3220,19 @@ begin
         Path := CheckItems[I].Path
       else
         Path := Base + CheckItems[I].Path;
+      Read := False;
+      Match := False;
+      if CheckItems[I].Size >= 0 then
+        if CheckAlgo = haMD5 then          // the engine's own MD5 is the quicker one
+        begin
+          Read := FileSums(Path, True, Crc, Md5, CountBytes, @FCancelled);
+          Match := Read and (Md5 = DigestToHex(Entries[I].Hash));
+        end
+        else
+        begin
+          Read := FileDigest(Path, CheckAlgo, True, D, CountBytes, @FCancelled);
+          Match := Read and DigestsEqual(D, Entries[I].Hash);
+        end;
       if CheckItems[I].Size < 0 then
       begin
         CheckItems[I].Status := csMissing;
@@ -2969,7 +3240,7 @@ begin
         Inc(FProgress.Skipped);
         Log('  missing: ' + CheckItems[I].Path);
       end
-      else if not FileSums(Path, True, Crc, Md5, CountBytes, @FCancelled) then
+      else if not Read then
       begin
         if FCancelled then Break;
         CheckItems[I].Status := csUnreadable;
@@ -2977,12 +3248,12 @@ begin
         Inc(FProgress.Errors);
         Log('  could not read: ' + CheckItems[I].Path);
       end
-      else if Md5 <> Want[I] then
+      else if not Match then
       begin
         CheckItems[I].Status := csBad;
         Inc(Bad);
         Inc(FProgress.Errors);
-        Log('  BAD: ' + CheckItems[I].Path + ' - does not match its MD5');
+        Log('  BAD: ' + CheckItems[I].Path + ' - does not match its ' + HashNames[CheckAlgo]);
       end
       else
         CheckItems[I].Status := csOk;
@@ -3082,7 +3353,7 @@ function TOfflineCopy.DoRun: TCopyResult;
 
 var
   Preview: TCopyPreview;
-  Stamp, Dest, Alarming, Status, Names, MissingNames, SrcSlash: string;
+  Stamp, Dest, Alarming, NoVer, Status, Names, MissingNames, SrcSlash: string;
   Srcs: TBackupSourceArray;         // the ticked sources that are there, in list order
   Missing: TPathList;
   Plans: array of TCopyPlan;
@@ -3136,9 +3407,10 @@ begin
     SetLength(Srcs, Length(Srcs) + 1);
     Srcs[High(Srcs)] := Src;
   end;
-  Stamp := FormatDateTime('yyyy-mm-dd_hhnn', Now);
+  Stamp := ArchiveFolderName(Now);     // the day's archive, ARCHIVE\MMDDYY
   if Length(Srcs) = 0 then
   begin
+    MoveOldVersions;
     MoveRemovedFolders(Stamp);
     if Length(Missing) > 0 then
     begin
@@ -3195,13 +3467,22 @@ begin
           if Alarming <> '' then Alarming := Alarming + ', ';
           Alarming := Alarming + Srcs[I].Name;
         end;
+      // folders whose archive is switched off and that have files to replace or delete
+      NoVer := '';
+      for I := 0 to High(Srcs) do
+        if Srcs[I].NoArchive and (Plans[I].Changed + Plans[I].Deleted > 0) then
+        begin
+          if NoVer <> '' then NoVer := NoVer + ', ';
+          NoVer := NoVer + Srcs[I].Name;
+        end;
       if not AssumeYes and Assigned(FOnPreview) and (FSettings.PreviewAlways or (Alarming <> '') or
-         PlansDelete(Plans) or (RemovedToMove > 0)) then
+         PlansDelete(Plans) or (RemovedToMove > 0) or (NoVer <> '')) then
       begin
         // the preview shows everything - and answers the safety check too
         Preview := Default(TCopyPreview);
         Preview.Drive := DriveTag;
         Preview.Warning := Alarming;
+        Preview.NoArchive := NoVer;
         for I := 0 to High(Srcs) do
           for J := 0 to High(Plans[I].Items) do
           begin
@@ -3239,6 +3520,7 @@ begin
         Log(DriveTag + ': safety check - large change confirmed by user');
       end;
 
+      MoveOldVersions;
       MoveRemovedFolders(Stamp);
       FailedCount := 0;
       FProgress.BytesTotal := TotalBytes;
@@ -3252,12 +3534,23 @@ begin
           IntToStr(Length(Srcs)) + ')';
         Dest := FDrive + MirrorFolder(Srcs[I]);
         DoMoves(Srcs[I], Plans[I]);
-        SaveVersions(Plans[I], MirrorFolder(Srcs[I]), Dest, Stamp, Moved, VerFailed);
+        Moved := 0;
+        VerFailed := 0;
+        if Srcs[I].NoArchive then
+        begin
+          // switched off for this folder: robocopy replaces and deletes on the drive directly
+          if Plans[I].Changed + Plans[I].Deleted > 0 then
+            Log('  ' + Srcs[I].Name + ': not archived (switched off for this folder) - ' +
+              IntToStr(Plans[I].Changed) + ' changed and ' + IntToStr(Plans[I].Deleted) +
+              ' deleted file(s) are replaced or deleted directly');
+        end
+        else
+          ArchiveFiles(Plans[I], MirrorFolder(Srcs[I]), Dest, Stamp, Moved, VerFailed);
         if (Moved > 0) or (VerFailed > 0) then
         begin
           Status := '';
           if VerFailed > 0 then Status := ' (' + IntToStr(VerFailed) + ' could not be moved)';
-          Log('  ' + Srcs[I].Name + ': kept ' + IntToStr(Moved) + ' old version(s) in _versions\' + Stamp + Status);
+          Log('  ' + Srcs[I].Name + ': archived ' + IntToStr(Moved) + ' old file(s) and folder(s) in ' + Stamp + Status);
         end;
         Rc := CopyWithProgress(Srcs[I].Name, Srcs[I].Path, Dest, Plans[I]);
         if not FCancelled and (Rc < 8) then RecordChecksums(MirrorFolder(Srcs[I]), Srcs[I].Path, Dest, Plans[I]);
@@ -3286,8 +3579,8 @@ begin
       if Secs > 0 then FProgress.Speed := Round(FProgress.FilesDoneBytes / Secs);
       Report;
 
-      Pruned := RemoveOldVersions;
-      if Pruned > 0 then Log('  pruned ' + IntToStr(Pruned) + ' old version set(s)');
+      Pruned := PruneArchives;
+      if Pruned > 0 then Log('  removed ' + IntToStr(Pruned) + ' old archive(s)');
       if (FailedCount > 0) or (Length(Missing) > 0) then Status := 'INCOMPLETE' else Status := 'complete';
       Names := '';
       for I := 0 to High(Srcs) do
@@ -3337,7 +3630,7 @@ begin
       else if Flushed then Log(DriveTag + ': ' + Status + ' - everything written to the drive, safe to unplug')
       else Log(DriveTag + ': ' + Status + ' - could not flush the drive''s write cache; wait 30 seconds before unplugging');
       if FChecksumsSkipped then
-        Log(DriveTag + ': checksums not recorded (switched off under MD5 check) - run Verify drive to add them');
+        Log(DriveTag + ': checksums not recorded (switched off in Settings) - run Verify drive to add them');
       if MissingNames <> '' then Result := crIncomplete else Result := crOk;
     except
       on E: Exception do

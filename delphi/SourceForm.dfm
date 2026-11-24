@@ -1,11 +1,11 @@
 object FormSource: TFormSource
   Left = 450
-  Height = 250
+  Height = 284
   Top = 250
   Width = 560
   BorderStyle = bsDialog
   Caption = 'Backup folder'
-  ClientHeight = 250
+  ClientHeight = 284
   ClientWidth = 560
   Position = poOwnerFormCenter
   PixelsPerInch = 96
@@ -67,29 +67,41 @@ object FormSource: TFormSource
     AutoSize = False
     Caption =
       'Changing the folder or its name starts a new copy at the next run. On a drive, the old copy is ' +
-      'then moved to _versions like a removed folder. A name that is already taken on the same drive ' +
+      'then archived like a removed folder. A name that is already taken on the same drive ' +
       'letter gets a number, like MUSIC (2).'
     WordWrap = True
+  end
+  object CheckArchive: TCheckBox
+    Left = 12
+    Height = 19
+    Top = 202
+    Width = 536
+    Caption = 'Archive changed and deleted files (recommended)'
+    Checked = True
+    State = cbChecked
+    TabOrder = 3
   end
   object ButtonOK: TButton
     Left = 372
     Height = 28
-    Top = 210
+    Top = 244
+    Anchors = [akRight, akBottom]
     Width = 84
     Caption = 'OK'
     Default = True
     OnClick = ButtonOKClick
-    TabOrder = 3
+    TabOrder = 4
   end
   object ButtonCancel: TButton
     Left = 464
     Height = 28
-    Top = 210
+    Top = 244
+    Anchors = [akRight, akBottom]
     Width = 84
     Cancel = True
     Caption = 'Cancel'
     ModalResult = 2
-    TabOrder = 4
+    TabOrder = 5
   end
   object FolderDialog: TFileOpenDialog
     FavoriteLinks = <>

@@ -12,8 +12,12 @@ uses
   DrivesPage in 'DrivesPage.pas' {FrameDrives: TFrame},
   PreviewForm in 'PreviewForm.pas' {FormPreview},
   CheckPage in 'CheckPage.pas' {FrameCheck: TFrame},
+  ChecksumsPage in 'ChecksumsPage.pas' {FrameChecksums: TFrame},
   OfflineEngine in '..\common\OfflineEngine.pas',
-  DriveWatcher in '..\common\DriveWatcher.pas';
+  DriveWatcher in '..\common\DriveWatcher.pas',
+  Hashes in '..\common\Hashes.pas',
+  Digests in '..\common\Digests.pas',
+  Checksums in '..\common\Checksums.pas';
 
 {$R *.res}   // icon + manifest, built from OfflineBackup.rc by build.cmd
 

@@ -2,7 +2,8 @@ unit CheckPage;
 
 { MD5 check area of the Lazarus/LCL main window: pick an .md5 file to check, then see how many of its files match, are
   bad, missing or unreadable, and the files of each. The check itself runs in the main window, which shows its
-  progress under Backup. The Delphi edition has the same page in ..\delphi\CheckPage.pas. }
+  progress under Backup. Other checksum lists (.sha1, .sha256, .sfv, ...) are checked the same way, and the result can
+  be copied or saved as a text report. The Delphi edition has the same page in ..\delphi\CheckPage.pas. }
 
 {$mode delphi}{$H+}
 
@@ -10,7 +11,7 @@ interface
 
 uses
   Windows, SysUtils, Classes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls,
-  OfflineEngine;
+  Clipbrd, OfflineEngine, Hashes, Checksums;
 
 type
   TCheckFileEvent = procedure(const Md5File: string) of object;
@@ -19,6 +20,9 @@ type
     PanelActions: TPanel;
     ButtonOpen: TButton;
     ButtonAgain: TButton;
+    ButtonCopyReport: TButton;
+    ButtonSaveReport: TButton;
+    ReportDialog: TSaveDialog;
     PageCheck: TPageControl;
     TabSummary: TTabSheet;
     LabelFile: TLabel;
@@ -29,12 +33,10 @@ type
     LabelFiles: TLabel;
     ListFiles: TListView;
     Md5Dialog: TOpenDialog;
-    PanelRecord: TPanel;
-    CheckRecord: TCheckBox;
-    LabelRecordNote: TLabel;
     procedure ButtonOpenClick(Sender: TObject);
-    procedure CheckRecordClick(Sender: TObject);
     procedure ButtonAgainClick(Sender: TObject);
+    procedure ButtonCopyReportClick(Sender: TObject);
+    procedure ButtonSaveReportClick(Sender: TObject);
     procedure ListSummarySelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
     procedure ListSummaryDblClick(Sender: TObject);
     procedure ListFilesData(Sender: TObject; Item: TListItem);
@@ -42,25 +44,21 @@ type
     FItems: TCheckItems;
     FShown: array of Integer;     // indexes into FItems for the rows of ListFiles
     FMd5File: string;             // the file checked last, for Check again
+    FAlgo: THashAlgo;             // ... its algorithm
+    FResult: TCopyResult;         // ... and how the check ended, for the report
     FBusy: Boolean;
     FDrives: TOfflineDriveArray;  // OFFLINE drives plugged in, for where Open MD5 file starts
     FOnCheck: TCheckFileEvent;
-    FOnRecordChange: TNotifyEvent;
-    FSetting: Boolean;            // SetRecordChecksums is setting the tick: not a change by the user
     function Md5Folder: string;
     procedure ShowStatus(Row: Integer);
     procedure UpdateButtons;
   public
-    procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult);
+    procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo);
     procedure SetBusy(Busy: Boolean);
     procedure SetDrives(const Drives: TOfflineDriveArray);
-    // the 'record checksums after each copy' setting, shown on this page
-    procedure SetRecordChecksums(Value: Boolean);
-    function RecordChecksums: Boolean;
     // asks for an .md5 file and checks it
     procedure OpenFile;
     property OnCheck: TCheckFileEvent read FOnCheck write FOnCheck;      // check this file now
-    property OnRecordChange: TNotifyEvent read FOnRecordChange write FOnRecordChange;   // the tick was changed
   end;
 
 implementation
@@ -68,9 +66,10 @@ implementation
 {$R *.lfm}
 
 const
-  RowNames: array[TCheckStatus] of string = ('Match', 'BAD - do not match their MD5', 'Missing', 'Could not be read');
+  RowNames: array[TCheckStatus] of string = ('Match', 'BAD - do not match their checksum', 'Missing',
+    'Could not be read');
 
-procedure TFrameCheck.ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult);
+procedure TFrameCheck.ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo);
 var
   St: TCheckStatus;
   Count: array[TCheckStatus] of Integer;
@@ -80,8 +79,10 @@ var
 begin
   FItems := Items;
   FMd5File := Md5File;
+  FAlgo := Algo;
+  FResult := R;
   // the name first: a long folder is cut off at the window's edge, and the hint has all of it
-  LabelFile.Caption := ExtractFileName(Md5File) + '   in ' + ExtractFileDir(Md5File);
+  LabelFile.Caption := ExtractFileName(Md5File) + ' (' + HashNames[Algo] + ')   in ' + ExtractFileDir(Md5File);
   LabelFile.Hint := Md5File;
   LabelFile.ShowHint := True;
   for St := Low(TCheckStatus) to High(TCheckStatus) do
@@ -99,6 +100,12 @@ begin
     LabelResult.Caption := 'Cancelled - these are the files checked so far.'
   else if R = crOk then
     LabelResult.Caption := 'All ' + FormatFloat('#,##0', Length(Items)) + ' files match.'
+  else if Length(Items) = 0 then
+  begin
+    LabelResult.Caption := 'No files checked: this is not a checksum list this app can read (.md5, .sha1, .sha256, ' +
+      '.sfv, ...), or it lists no files.';
+    LabelResult.Font.Color := clRed;
+  end
   else
   begin
     LabelResult.Caption := 'Some files do not match, are missing or could not be read - see the Files tab.';
@@ -146,27 +153,8 @@ begin
   // one thing at a time: not while a copy, verify or check is running
   ButtonOpen.Enabled := not FBusy;
   ButtonAgain.Enabled := not FBusy and (FMd5File <> '');
-  CheckRecord.Enabled := not FBusy;      // a copy that is running keeps the setting it started with
-end;
-
-procedure TFrameCheck.SetRecordChecksums(Value: Boolean);
-begin
-  FSetting := True;
-  try
-    CheckRecord.Checked := Value;
-  finally
-    FSetting := False;
-  end;
-end;
-
-function TFrameCheck.RecordChecksums: Boolean;
-begin
-  Result := CheckRecord.Checked;
-end;
-
-procedure TFrameCheck.CheckRecordClick(Sender: TObject);
-begin
-  if not FSetting and Assigned(FOnRecordChange) then FOnRecordChange(Self);
+  ButtonCopyReport.Enabled := Length(FItems) > 0;
+  ButtonSaveReport.Enabled := Length(FItems) > 0;
 end;
 
 procedure TFrameCheck.SetDrives(const Drives: TOfflineDriveArray);
@@ -221,6 +209,22 @@ procedure TFrameCheck.ButtonAgainClick(Sender: TObject);
 begin
   if FBusy or (FMd5File = '') then Exit;
   if Assigned(FOnCheck) then FOnCheck(FMd5File);
+end;
+
+procedure TFrameCheck.ButtonCopyReportClick(Sender: TObject);
+begin
+  if Length(FItems) = 0 then Exit;
+  Clipboard.AsText := CheckReportText(FMd5File, FAlgo, FItems, FResult);
+end;
+
+procedure TFrameCheck.ButtonSaveReportClick(Sender: TObject);
+begin
+  if Length(FItems) = 0 then Exit;
+  ReportDialog.InitialDir := ExtractFileDir(FMd5File);
+  ReportDialog.FileName := ChangeFileExt(ExtractFileName(FMd5File), '') + ' report.txt';
+  if not ReportDialog.Execute then Exit;
+  if not SaveTextUtf8(ReportDialog.FileName, CheckReportText(FMd5File, FAlgo, FItems, FResult)) then
+    MessageDlg('Could not save ' + ReportDialog.FileName, mtError, [mbOK], 0);
 end;
 
 { Fills the file list with the files of summary row Row (its Data is status + 1, nil for all) }

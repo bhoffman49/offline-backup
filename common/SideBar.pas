@@ -1,6 +1,7 @@
 unit SideBar;
 
-{ The main window's left column: one large icon button per area (Backup, Drives, MD5 check, Settings), drawn here so the
+{ The main window's left column: one large icon button per area (Backup, Drives, MD5 check, Settings,
+  Checksum Applet), drawn here so the
   Delphi VCL and Lazarus LCL editions look the same. The icons are RCDATA resources named SIDE_<NAME>, each a
   multi-size .ico from tools\make-sidebar-icons.py; the size nearest the screen's scaling is used. }
 
@@ -13,7 +14,7 @@ uses
 
 type
   TSideItem = record
-    Caption: string;
+    Caption: string;                  // '|' starts a second line: 'Checksum|Applet'
     Icon: HICON;                      // 0 if the resource is missing
     IconSize: Integer;
     Enabled: Boolean;                 // False = shown faded, for an area that is still to come
@@ -29,7 +30,8 @@ type
     FOnChange: TNotifyEvent;
     FOnChanging: TSideChangingEvent;
     function Scale(N: Integer): Integer;
-    function ItemHeight: Integer;
+    function ItemHeight(I: Integer): Integer;
+    function ItemTop(I: Integer): Integer;
     function ItemAt(Y: Integer): Integer;
     procedure SetItemIndex(Value: Integer);
   protected
@@ -41,7 +43,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    // IconName: the resource is SIDE_<IconName>
+    // IconName: the resource is SIDE_<IconName>; a '|' in Caption puts the rest on a second line
     procedure AddItem(const Caption, IconName: string; Enabled: Boolean = True);
     function PreferredWidth: Integer;
     // setting it calls OnChange too, so the area shown always follows the sidebar
@@ -56,6 +58,7 @@ const
   ICON_SIZE = 32;                     // at 96 dpi
   ITEM_HEIGHT = 70;
   ITEM_WIDTH = 92;
+  LINE_HEIGHT = 16;                   // each extra caption line makes its item this much taller
 
 { Loads the entry of a multi-size .ico resource that is nearest Size (the larger one on a tie); Actual is its size.
   Windows makes the icon (not TIcon): the LCL's icon reader garbles these 32-bit icons. }
@@ -129,9 +132,26 @@ begin
   {$ENDIF}
 end;
 
-function TSideBar.ItemHeight: Integer;
+function CaptionLines(const Caption: string): Integer;
+var
+  I: Integer;
 begin
-  Result := Scale(ITEM_HEIGHT);
+  Result := 1;
+  for I := 1 to Length(Caption) do
+    if Caption[I] = '|' then Inc(Result);
+end;
+
+function TSideBar.ItemHeight(I: Integer): Integer;
+begin
+  Result := Scale(ITEM_HEIGHT + (CaptionLines(FItems[I].Caption) - 1) * LINE_HEIGHT);
+end;
+
+function TSideBar.ItemTop(I: Integer): Integer;
+var
+  J: Integer;
+begin
+  Result := Scale(6);
+  for J := 0 to I - 1 do Inc(Result, ItemHeight(J));
 end;
 
 function TSideBar.PreferredWidth: Integer;
@@ -152,9 +172,12 @@ begin
 end;
 
 function TSideBar.ItemAt(Y: Integer): Integer;
+var
+  I: Integer;
 begin
-  Result := (Y - Scale(6)) div ItemHeight;
-  if (Y < Scale(6)) or (Result > High(FItems)) then Result := -1;
+  Result := -1;
+  for I := 0 to High(FItems) do
+    if (Y >= ItemTop(I)) and (Y < ItemTop(I) + ItemHeight(I)) then Exit(I);
 end;
 
 procedure TSideBar.SetItemIndex(Value: Integer);
@@ -172,8 +195,9 @@ end;
 
 procedure TSideBar.Paint;
 var
-  I, Top, X: Integer;
+  I, Top, X, Y, P: Integer;
   R: TRect;
+  Rest, Line: string;
 begin
   Canvas.Brush.Color := Color;
   Canvas.FillRect(ClientRect);
@@ -184,8 +208,8 @@ begin
   Canvas.Font.Assign(Font);
   for I := 0 to High(FItems) do
   begin
-    Top := Scale(6) + I * ItemHeight;
-    R := Rect(Scale(4), Top, ClientWidth - Scale(5), Top + ItemHeight - Scale(4));
+    Top := ItemTop(I);
+    R := Rect(Scale(4), Top, ClientWidth - Scale(5), Top + ItemHeight(I) - Scale(4));
     if I = FItemIndex then
     begin
       Canvas.Brush.Color := clHighlight;
@@ -213,8 +237,24 @@ begin
         DI_NORMAL);
     end;
     Canvas.Brush.Style := bsClear;
-    Canvas.TextOut((ClientWidth - Canvas.TextWidth(FItems[I].Caption)) div 2,
-      Top + Scale(16) + Scale(ICON_SIZE), FItems[I].Caption);
+    // one line, or more where the caption has a '|'
+    Rest := FItems[I].Caption;
+    Y := Top + Scale(16) + Scale(ICON_SIZE);
+    repeat
+      P := Pos('|', Rest);
+      if P > 0 then
+      begin
+        Line := Copy(Rest, 1, P - 1);
+        Delete(Rest, 1, P);
+      end
+      else
+      begin
+        Line := Rest;
+        Rest := '';
+      end;
+      Canvas.TextOut((ClientWidth - Canvas.TextWidth(Line)) div 2, Y, Line);
+      Inc(Y, Scale(LINE_HEIGHT));
+    until (P = 0);
     Canvas.Brush.Style := bsSolid;
   end;
 end;

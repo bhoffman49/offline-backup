@@ -65,6 +65,14 @@ def settings():
     return im
 
 
+def checksums():
+    im, d = new()
+    d.rounded_rectangle([20, 20, S - 20, S - 20], radius=28, fill=TEAL)    # a square with a plus: make checksums
+    d.rectangle([108, 56, 148, 200], fill=LIGHT)
+    d.rectangle([56, 108, 200, 148], fill=LIGHT)
+    return im
+
+
 def restore():
     im, d = new()
     drive(d, 150)
@@ -76,7 +84,7 @@ def restore():
 if __name__ == '__main__':
     OUT.mkdir(exist_ok=True)
     for name, fn in [('backup', backup), ('drives', drives), ('check', check), ('settings', settings),
-                     ('restore', restore)]:
+                     ('restore', restore), ('checksums', checksums)]:
         out = OUT / (name + '.ico')
         fn().save(out, sizes=SIZES, bitmap_format='bmp')
         print('wrote', out)

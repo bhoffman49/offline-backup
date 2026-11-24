@@ -57,12 +57,9 @@ begin
       F.LabelBanner.Caption := 'No files or folders need to be copied or deleted.'
     else
       F.LabelBanner.Caption := 'Nothing on the drive has been changed yet. Click a line to see its files.';
-    if P.Warning <> '' then
-      F.LabelWarning.Caption := 'Safety check: an unusually large share of the files in ' + P.Warning +
-        ' would be changed or deleted. That can mean something went wrong on the source (ransomware, a deleted ' +
-        'folder, a bad restore). If you go ahead, old versions are kept in _versions.'
-    else
-      F.LabelWarning.Visible := False;
+    // the safety check and/or the folders whose archive is switched off (the text is the engine's)
+    F.LabelWarning.Caption := PreviewWarningText(P);
+    F.LabelWarning.Visible := F.LabelWarning.Caption <> '';
 
     for K := Low(TPreviewKind) to High(TPreviewKind) do
     begin

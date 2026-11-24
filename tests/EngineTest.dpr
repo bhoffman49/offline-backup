@@ -9,7 +9,7 @@ program EngineTest;
 {$IFDEF FPC}{$mode delphiunicode}{$H+}{$ENDIF}
 
 uses
-  Windows, SysUtils, Classes, OfflineEngine;
+  Windows, SysUtils, Classes, OfflineEngine, Hashes, Digests, Checksums;
 
 type
   THandlers = class
@@ -168,13 +168,13 @@ function VersionsFileOn(const D, Rel: string): Boolean;
 var
   SR: TSearchRec;
 begin
-  // _versions\<stamp>\<letter>-mirror\<rel> - the same path as on the drive
+  // ARCHIVE\MMDDYY\<letter>-mirror\<rel> - the same path as on the drive
   Result := False;
-  if FindFirst(D + '_versions\*', faDirectory, SR) = 0 then
+  if FindFirst(D + 'ARCHIVE\*', faDirectory, SR) = 0 then
   try
     repeat
       if (SR.Name <> '.') and (SR.Name <> '..') and
-         (FileSizeW(D + '_versions\' + SR.Name + '\' + SourceLetter(Work) + '-mirror\' + Rel) >= 0) then
+         (FileSizeW(D + 'ARCHIVE\' + SR.Name + '\' + SourceLetter(Work) + '-mirror\' + Rel) >= 0) then
         Result := True;
     until FindNext(SR) <> 0;
   finally
@@ -436,6 +436,8 @@ begin
   Check(H.Last.Checking and (H.Last.Errors = 1) and (H.Last.Skipped = 1), 'progress counts bad and missing');
 end;
 
+{$I ChecksumTests.inc}
+
 procedure TestChecksums;
 var
   R: TCopyResult;
@@ -667,7 +669,7 @@ begin
     '... not as add + delete');
   Check((R = crOk) and (H.Last.FilesTotal = 0), 'nothing copied (' + IntToStr(H.Last.FilesTotal) + ' files)');
   Check(FileExists(M5 + 'sub\x.mp3') and not FileExists(M5 + 'x.mp3'), 'moved on the drive');
-  Check(not VersionsFileOn(D5, 'Music\x.mp3'), '... and not put in _versions');
+  Check(not VersionsFileOn(D5, 'Music\x.mp3'), '... and not archived');
   Check((RecordedCrc(D5, 'Music', 'sub\x.mp3') = CrcHex(Src + 'sub\x.mp3')) and (RecordedCrc(D5, 'Music', 'x.mp3') = ''),
     'its checksum moved with it');
   Check(Pos(' *Music\sub\x.mp3', ReadUtf8(D5 + SourceLetter(Work) + '-mirror\Music.md5')) > 0, '... in the .md5 too');
@@ -688,7 +690,7 @@ begin
   Check((PreviewCount(pkMove) = 0) and PreviewHas(pkAdd, 'w.mp3') and PreviewHas(pkDelete, 'z.mp3'),
     'same size and time, other content: add + delete, not a move');
   Check((R = crOk) and (ReadFile(M5 + 'w.mp3') = 'THE Z SONG') and VersionsFileOn(D5, 'Music\z.mp3'),
-    '... copied, and the old one kept in _versions');
+    '... copied, and the old one archived');
 
   // moved and then changed (time differs): not a move either
   RenameFile(Src + 'y.mp3', Src + 'y2.mp3');
@@ -722,6 +724,8 @@ begin
 end;
 
 { The drive's own folder list. Uses the folders made by TestSeveralFolders. }
+{$I ArchiveTests.inc}
+
 procedure TestDriveFolders;
 var
   S: TBackupSettings;
@@ -767,7 +771,7 @@ begin
   Check(R = crOk, 'copy ok (' + CopyResultText(R) + ')');
   Check(FileExists(M3 + 'MY PHOTOS\p1.jpg') and not FileExists(M3 + 'MY PHOTOS\p3.jpg'), 'its copy stays as it was');
 
-  WriteLn('--- removed from the list: moved to _versions at the next copy');
+  WriteLn('--- removed from the list: archived at the next copy');
   ReadDriveInfo(D3, Info);
   Delete(Info.Sources, 0, 1);
   SetLength(Info.Removed, 2);
@@ -778,7 +782,7 @@ begin
   Check(R = crOk, 'copy ok (' + CopyResultText(R) + ')');
   Check(not DirectoryExists(M3 + 'MY PHOTOS'), 'its copy is gone from the mirror');
   Check(not FileExists(D3 + '_checksums\' + SourceLetter(Work) + '-mirror\MY PHOTOS.crc'), '... and its checksums');
-  Check(VersionsFileOn(D3, 'MY PHOTOS\p1.jpg'), '... and kept in _versions');
+  Check(VersionsFileOn(D3, 'MY PHOTOS\p1.jpg'), '... and archived');
   Check(FileExists(M3 + 'Fotos-' + WideChar($00FC) + '\u.txt'), 'the other folder is untouched');
   ReadDriveInfo(D3, Info);
   Check(Length(Info.Removed) = 0, 'remove list cleared');
@@ -1092,11 +1096,11 @@ begin
   Check(ReadFile(Mirror + 'One\a.txt') = 'alpha, second edition', 'changed file updated');
   Check(not FileExists(Mirror + 'One\sub\b.txt'), 'deleted file removed from mirror');
   Check(not DirectoryExists(Mirror + 'One\gone'), 'deleted folder removed from mirror');
-  Check(VersionsFile('One\a.txt'), 'old a.txt kept in _versions');
-  Check(VersionsFile('One\sub\b.txt'), 'deleted b.txt kept in _versions');
-  Check(VersionsFile('One\gone\c.txt'), 'deleted folder kept in _versions');
+  Check(VersionsFile('One\a.txt'), 'old a.txt archived');
+  Check(VersionsFile('One\sub\b.txt'), 'deleted b.txt archived');
+  Check(VersionsFile('One\gone\c.txt'), 'deleted folder archived');
   Check(FileSizeW(Mirror + 'Two\' + Uni) = 6, 'changed non-ANSI file updated');
-  Check(VersionsFile('Two\' + Uni), 'old non-ANSI file kept in _versions');
+  Check(VersionsFile('Two\' + Uni), 'old non-ANSI file archived');
 
   WriteLn('--- brake: all 120 files in Many changed');
   for I := 1 to 120 do WriteFile(Work + 'src\Many\f' + IntToStr(I) + '.txt', 'version two');
@@ -1110,7 +1114,7 @@ begin
   R := RunCopy(False);
   Check(R = crOk, 'goes ahead when the answer is yes (' + CopyResultText(R) + ')');
   Check(ReadFile(Mirror + 'Many\f1.txt') = 'version two', '... mirror updated');
-  Check(VersionsFile('Many\f1.txt'), '... old versions kept');
+  Check(VersionsFile('Many\f1.txt'), '... old files archived');
 
   TestChecksums;
   TestPreview;
@@ -1119,6 +1123,11 @@ begin
   TestSettingsFile;
   TestSeveralFolders;
   TestDriveFolders;
+  TestHashes;
+  TestListFormats;
+  TestMakeLists;
+  TestNoArchive;
+  TestArchiveFolders;
 
   WriteLn('--- formatting');
   Check(FormatSize(26581402) = '25.35 MB', 'FormatSize MB (' + FormatSize(26581402) + ')');

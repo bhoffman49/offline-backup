@@ -7,7 +7,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, UITypes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, AboutBox;
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, ChecksumsPage, AboutBox;
 
 const
   // the areas of the sidebar, in its order
@@ -15,6 +15,7 @@ const
   AREA_DRIVES = 1;
   AREA_CHECK = 2;
   AREA_SETTINGS = 3;
+  AREA_CHECKSUMS = 4;               // Restore comes later; it will go before this
 
 type
   TFormMain = class(TForm)
@@ -81,6 +82,7 @@ type
     FSide: TSideBar;
     FDrivesPage: TFrameDrives;
     FCheckPage: TFrameCheck;
+    FChecksumsPage: TFrameChecksums;
     FSettingsPage: TFrameSettings;
     FReadyHint: string;               // what the status bar says while nothing else has happened
     procedure SideChanging(Sender: TObject; NewIndex: Integer; var Allow: Boolean);
@@ -91,9 +93,10 @@ type
     procedure SetStatus(const S: string);
     procedure OpenSettings;
     procedure SettingsSaved(const Settings: TBackupSettings);
-    procedure RecordChecksumsChanged(Sender: TObject);
     procedure OpenDrives;
     procedure CheckRequested(const Md5File: string);
+    procedure ChecksumsRunningChange(Sender: TObject);
+    function Busy: Boolean;
     procedure DrivesChanged(Sender: TObject);
     procedure RefreshDrives(Announce: Boolean);
     procedure LogDriveState(const D: TOfflineDrive);
@@ -156,7 +159,7 @@ begin
   FSide.AddItem('Drives', 'drives');
   FSide.AddItem('MD5 check', 'check');
   FSide.AddItem('Settings', 'settings');
-  FSide.AddItem('Restore', 'restore', False);   // still to come
+  FSide.AddItem('Checksum|Applet', 'checksums');
   FSide.ItemIndex := AREA_BACKUP;
   FSide.OnChanging := SideChanging;
   FSide.OnChange := SideChange;
@@ -171,8 +174,12 @@ begin
   FCheckPage.Parent := Self;
   FCheckPage.Align := alClient;
   FCheckPage.OnCheck := CheckRequested;
-  FCheckPage.SetRecordChecksums(FSettings.RecordChecksums);
-  FCheckPage.OnRecordChange := RecordChecksumsChanged;
+  FChecksumsPage := TFrameChecksums.Create(Self);
+  FChecksumsPage.Visible := False;
+  FChecksumsPage.Parent := Self;
+  FChecksumsPage.Align := alClient;
+  FChecksumsPage.OnCheck := CheckRequested;
+  FChecksumsPage.OnRunningChange := ChecksumsRunningChange;
   FSettingsPage := TFrameSettings.Create(Self);
   FSettingsPage.Visible := False;
   FSettingsPage.Parent := Self;
@@ -201,6 +208,7 @@ begin
   // Windows is shutting down: let the window close instead of hiding
   FQuitting := True;
   if Assigned(FThread) then FThread.Cancel;
+  FChecksumsPage.Cancel;
   inherited;
 end;
 
@@ -263,6 +271,13 @@ begin
     MessageDlg('A copy is running. Cancel it first, then exit.', mtInformation, [mbOK], 0);
     Exit;
   end;
+  if FChecksumsPage.Running then
+  begin
+    ShowWindow;
+    FSide.ItemIndex := AREA_CHECKSUMS;
+    MessageDlg('Checksums are being made. Cancel that first, then exit.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
   if FDrivesPage.Modified or FSettingsPage.Modified then
   begin
     ShowWindow;
@@ -286,6 +301,7 @@ begin
   FDrivesPage.Visible := FSide.ItemIndex = AREA_DRIVES;
   FCheckPage.Visible := FSide.ItemIndex = AREA_CHECK;
   FSettingsPage.Visible := FSide.ItemIndex = AREA_SETTINGS;
+  FChecksumsPage.Visible := FSide.ItemIndex = AREA_CHECKSUMS;
 end;
 
 procedure TFormMain.DrivesVerify(const Drive: TOfflineDrive);
@@ -378,7 +394,8 @@ begin
   end;
   if Length(FDrives) = 0 then
     LabelDrives.Caption := 'No OFFLINE-x drive plugged in. Plug in a backup drive whose name (volume label) is ' +
-      'OFFLINE-A, OFFLINE-B, ... and it shows up here.'
+      'OFFLINE-A, OFFLINE-B, ... and it shows up here. To name a drive: in File Explorer, right-click it, choose ' +
+      'Rename and type OFFLINE-A.'
   else LabelDrives.Caption := 'Start copy copies to every drive below that has been set up. A new drive is set up ' +
     'under Drives first.';
   if Length(FDrives) = 0 then StatusBar.Panels[1].Text := 'No OFFLINE drive plugged in'
@@ -465,7 +482,7 @@ begin
     else if Names = '' then Names := 'nothing ticked';
     AddLog(D.VolLabel + ': backs up ' + Names);
     if Length(Info.Removed) > 0 then
-      AddLog(D.VolLabel + ': ' + IntToStr(Length(Info.Removed)) + ' folder(s) to move to _versions at the next copy');
+      AddLog(D.VolLabel + ': ' + IntToStr(Length(Info.Removed)) + ' folder(s) to archive at the next copy');
   end;
 end;
 
@@ -481,6 +498,20 @@ begin
       FormatSize(Info.Runs[High(Info.Runs)].Bytes) + ' copied';
 end;
 
+{ A copy, verify or check is running, or checksums are being made }
+function TFormMain.Busy: Boolean;
+begin
+  Result := (FThread <> nil) or ((FChecksumsPage <> nil) and FChecksumsPage.Running);
+end;
+
+{ Checksums started or ended making a list }
+procedure TFormMain.ChecksumsRunningChange(Sender: TObject);
+begin
+  UpdateButtons;
+  if FChecksumsPage.Running then SetStatus('Making checksums - see Checksum Applet')
+  else SetStatus('Checksum Applet: ' + FChecksumsPage.LabelStatus.Caption);
+end;
+
 procedure TFormMain.UpdateButtons;
 var
   I, Vera: Integer;
@@ -490,14 +521,16 @@ begin
   Ready := False;                     // only drives that have been set up are copied to
   for I := 0 to High(FDrives) do
     if FDrives[I].SetUp then Ready := True;
-  ButtonStart.Enabled := (FThread = nil) and Ready;
+  ButtonStart.Enabled := not Busy and Ready;
   MenuStart.Enabled := ButtonStart.Enabled;
   ButtonCancel.Enabled := FThread <> nil;
   // not while copying: the run in progress keeps the settings it started with
-  FDrivesPage.SetBusy(FThread <> nil);
-  FCheckPage.SetBusy(FThread <> nil);
+  // ... and one thing at a time: no copy, verify or check while checksums are being made, and the other way round
+  FDrivesPage.SetBusy(Busy);
+  FCheckPage.SetBusy(Busy);
   FSettingsPage.SetBusy(FThread <> nil);
-  MenuCheck.Enabled := FThread = nil;
+  FChecksumsPage.SetBusy(FThread <> nil);
+  MenuCheck.Enabled := not Busy;
   // Dismount only shows when a VeraCrypt OFFLINE volume is mounted - everyone else never sees it
   Vera := 0;
   VeraName := '';
@@ -519,7 +552,7 @@ procedure TFormMain.ButtonStartClick(Sender: TObject);
 var
   I: Integer;
 begin
-  if Assigned(FThread) or (Length(FDrives) = 0) then Exit;
+  if Busy or (Length(FDrives) = 0) then Exit;
   FRunSummary := '';
   FRunProblem := False;
   FRunAllStopped := True;
@@ -612,25 +645,15 @@ begin
   FSide.ItemIndex := AREA_SETTINGS;
 end;
 
-{ The 'record checksums after each copy' tick on the MD5 check page: saved straight away, like the preview's tick }
-procedure TFormMain.RecordChecksumsChanged(Sender: TObject);
-begin
-  FSettings.RecordChecksums := FCheckPage.RecordChecksums;
-  SaveSettings(SettingsFileName, FSettings);
-  if not FSettingsPage.Modified then FSettingsPage.Load(FSettings);
-  if FSettings.RecordChecksums then AddLog('checksums are recorded after each copy again')
-  else AddLog('checksums are no longer recorded after each copy - Verify drive adds them (switch it back on under MD5 check)');
-end;
-
 { Save on the Settings page }
 procedure TFormMain.SettingsSaved(const Settings: TBackupSettings);
-var
-  Keep: Boolean;
 begin
-  Keep := FSettings.RecordChecksums;   // set on the MD5 check page, not on the Settings page
+  if Settings.RecordChecksums <> FSettings.RecordChecksums then
+    if Settings.RecordChecksums then AddLog('checksums are recorded after each copy again')
+    else AddLog('checksums are no longer recorded after each copy - Verify drive adds them (switch it back on ' +
+      'under Settings > Safety and archive)');
   FSettings := Settings;
-  FSettings.RecordChecksums := Keep;
-  FDrivesPage.SetDrives(FDrives, FSettings);    // Add starting folders uses the new ones
+  FDrivesPage.SetDrives(FDrives, FSettings);    // Add folders from Settings uses the new ones
   if SaveSettings(SettingsFileName, FSettings) then AddLog('settings saved to ' + SettingsFileName)
   else MessageDlg('Could not save the settings to ' + SettingsFileName + '. They are used until the app is closed.',
     mtWarning, [mbOK], 0);
@@ -643,7 +666,7 @@ end;
 
 procedure TFormMain.StartVerify(const Drive: TOfflineDrive);
 begin
-  if Assigned(FThread) then Exit;
+  if Busy then Exit;
   FQueue := nil;
   FRunSummary := '';
   FRunProblem := False;
@@ -711,7 +734,7 @@ end;
 { Open MD5 file or Check again on the MD5 check page: the progress shows under Backup, the result back on the page }
 procedure TFormMain.CheckRequested(const Md5File: string);
 begin
-  if Assigned(FThread) then Exit;
+  if Busy then Exit;
   FQueue := nil;
   ProgressBar.Position := 0;
   ClearProgress;
@@ -786,8 +809,8 @@ begin
   ShowWindow;
   GoAhead := MessageDlg('An unusually large number of files would be changed or deleted in: ' + Folders + '.' +
     sLineBreak + sLineBreak +
-    'That can mean something went wrong on G: (ransomware, a deleted folder, a bad restore). ' +
-    'Nothing on the drive has been touched yet. Old versions would be kept in _versions if you go ahead.' +
+    'That can mean something went wrong on the PC (ransomware, a deleted folder, a bad restore). ' +
+    'Nothing on the drive has been touched yet. Old files would be kept in the archive if you go ahead.' +
     sLineBreak + sLineBreak + 'Copy anyway?', mtWarning, [mbYes, mbNo], 0, mbNo) = mrYes;
 end;
 
@@ -921,7 +944,7 @@ begin
     TrayIcon.Hint := 'Offline Backup';
     UpdateButtons;
     ShowWindow;
-    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult);
+    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult, T.Engine.CheckAlgo);
     FSide.ItemIndex := AREA_CHECK;
     Exit;
   end;

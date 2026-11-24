@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.11.0 - 2026-11-24
+
+- **Checksum Applet**, a new area at the bottom of the sidebar (from the Checksum Applet Creator): makes a checksum list
+  for any folder - 15 algorithms (MD5, SHA1, SHA256/384/512, CRC32, RIPEMD, Tiger and more) in the usual formats
+  (hash \*name like ExactFile, md5sum, sha1sum, SFV, FileCheckMD5) - and, if you like, a small `checksum.exe` next
+  to it that checks the files on any PC with nothing installed. Its report says when the checksums were created.
+- **MD5 check** also checks `.sha1`, `.sha256`, `.sha512`, `.sfv` and the other lists the Checksum Applet area makes,
+  and BSD-style `MD5 (name) = ...` lines.
+- **Copy report** and **Save report...** on the MD5 check page: the result as text, like ExactFile's report.
+- **The archive**: files a copy overwrites or deletes now go to one folder per day inside an `ARCHIVE` folder in
+  the drive's root - `ARCHIVE\MMDDYY` (`ARCHIVE\112326` = 23 Nov 2026) - instead of `_versions\<date-time>`. All
+  copies on one day
+  share it, and a file already archived that day keeps its first copy. A drive's old `_versions` sets are moved into
+  the archive of their day at its first copy with 0.11. Settings' tab is now **Safety and archive**.
+- Easier to find your way the first time: the Backup page says how to name a drive OFFLINE-A; **Record checksums
+  after each copy** moved from the MD5 check page to **Settings > Safety and archive**; the Settings tab *Starting
+  folders* is now **Folders for new drives** (and the Drives button **Add folders from Settings**); the drive id moved
+  from the top of the Drives page to its History tab; the greyed-out **Restore** button and the unfinished **Prepare a
+  new drive...** button are hidden until they work.
+- Fixed: with the preview switched off, the safety-check question said something went wrong "on G:" whatever the
+  source was.
+- **The archive on or off for each folder on a drive** (Drives > Edit..., on by default; a new **Archive** column
+  shows it). Off, a copy replaces and deletes that folder's files on the drive straight away instead of archiving
+  them. Switching it off asks first, and the preview says so in red. Stored in the drive's map; maps from 0.10
+  archive every folder.
+
 ## 0.10.0 - 2026-11-06
 
 - **A new window.** A sidebar on the left with one area each - **Backup**, **Drives**, **MD5 check** and

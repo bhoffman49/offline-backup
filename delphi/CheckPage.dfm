@@ -31,38 +31,25 @@ object FrameCheck: TFrameCheck
       OnClick = ButtonAgainClick
       TabOrder = 1
     end
-  end
-  object PanelRecord: TPanel
-    Left = 0
-    Height = 64
-    Top = 453
-    Width = 618
-    Align = alBottom
-    BevelOuter = bvNone
-    TabOrder = 2
-    object CheckRecord: TCheckBox
-      Left = 12
-      Height = 19
-      Top = 6
-      Width = 600
-      Anchors = [akTop, akLeft, akRight]
-      Caption = 'Record checksums after each copy (needed for Verify, the .md5 files and move detection)'
-      Checked = True
-      State = cbChecked
-      OnClick = CheckRecordClick
-      TabOrder = 0
-    end
-    object LabelRecordNote: TLabel
-      Left = 31
+    object ButtonCopyReport: TButton
+      Left = 8
       Height = 30
-      Top = 28
-      Width = 581
-      Anchors = [akTop, akLeft, akRight]
-      AutoSize = False
-      Caption = 
-        'This is about every copy, not only the check here. Off: a copy ends sooner (on a first copy, much ' +
-        'sooner), and Verify drive adds the missing checksums later.'
-      WordWrap = True
+      Top = 124
+      Width = 130
+      Caption = 'Copy report'
+      Enabled = False
+      OnClick = ButtonCopyReportClick
+      TabOrder = 2
+    end
+    object ButtonSaveReport: TButton
+      Left = 8
+      Height = 30
+      Top = 162
+      Width = 130
+      Caption = 'Save report...'
+      Enabled = False
+      OnClick = ButtonSaveReportClick
+      TabOrder = 3
     end
   end
   object PageCheck: TPageControl
@@ -100,7 +87,8 @@ object FrameCheck: TFrameCheck
         AutoSize = False
         Caption =
           'Open MD5 file checks every file an .md5 file lists against its MD5 - for example the <letter>-mirror\<n' +
-          'ame>.md5 files on an OFFLINE drive, or a list made by ExactFile or md5sum. Nothing is changed.'
+          'ame>.md5 files on an OFFLINE drive, or a list made by ExactFile or md5sum. .sha1, .sha256, .sfv and ' +
+          'other checksum lists work too. Nothing is changed.'
         WordWrap = True
       end
       object ListSummary: TListView
@@ -196,10 +184,20 @@ object FrameCheck: TFrameCheck
   end
   object Md5Dialog: TOpenDialog
     DefaultExt = 'md5'
-    Filter = 'MD5 files (*.md5)|*.md5|All files (*.*)|*.*'
+    Filter = 
+      'Checksum lists|*.md5;*.sha1;*.sha256;*.sha384;*.sha512;*.sfv;*.crc32;*.md4;*.md2;*.adler32;*.gost;*.ripemd128;' +
+      '*.ripemd160;*.tiger128;*.tiger160;*.tiger192|MD5 files (*.md5)|*.md5|All files (*.*)|*.*'
     Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing]
-    Title = 'Check the files listed in an MD5 file'
+    Title = 'Check the files listed in an MD5 file or other checksum list'
     Left = 360
+    Top = 8
+  end
+  object ReportDialog: TSaveDialog
+    DefaultExt = 'txt'
+    Filter = 'Text files (*.txt)|*.txt|All files (*.*)|*.*'
+    Options = [ofOverwritePrompt, ofPathMustExist, ofEnableSizing]
+    Title = 'Save the check'#39's report'
+    Left = 400
     Top = 8
   end
 end
