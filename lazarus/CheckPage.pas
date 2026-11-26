@@ -53,7 +53,9 @@ type
     procedure ShowStatus(Row: Integer);
     procedure UpdateButtons;
   public
-    procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo);
+    // Seconds: how long the check took (shown with the result)
+    procedure ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo;
+      Seconds: Double);
     procedure SetBusy(Busy: Boolean);
     procedure SetDrives(const Drives: TOfflineDriveArray);
     // asks for an .md5 file and checks it
@@ -69,13 +71,16 @@ const
   RowNames: array[TCheckStatus] of string = ('Match', 'BAD - do not match their checksum', 'Missing',
     'Could not be read');
 
-procedure TFrameCheck.ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo);
+procedure TFrameCheck.ShowResult(const Md5File: string; const Items: TCheckItems; R: TCopyResult; Algo: THashAlgo;
+  Seconds: Double);
 var
   St: TCheckStatus;
   Count: array[TCheckStatus] of Integer;
   Bytes: array[TCheckStatus] of Int64;
   I: Integer;
   Item: TListItem;
+  Read: Int64;
+  Took: string;
 begin
   FItems := Items;
   FMd5File := Md5File;
@@ -110,6 +115,15 @@ begin
   begin
     LabelResult.Caption := 'Some files do not match, are missing or could not be read - see the Files tab.';
     LabelResult.Font.Color := clRed;
+  end;
+  // how long it took, and how fast the files were read
+  if (Length(Items) > 0) and (Seconds > 0) then
+  begin
+    Read := Bytes[csOk] + Bytes[csBad] + Bytes[csUnreadable];
+    if Seconds < 60 then Took := FormatFloat('0.0', Seconds) + ' sec' else Took := FormatDuration(Round(Seconds));
+    Took := 'Time taken: ' + Took + '  (' + FormatSize(Read);
+    if Seconds >= 0.1 then Took := Took + ' at ' + FormatSpeed(Round(Read / Seconds));
+    LabelResult.Caption := LabelResult.Caption + '   ' + Took + ')';
   end;
   ListSummary.Items.BeginUpdate;
   try

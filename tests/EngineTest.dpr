@@ -2,14 +2,14 @@ program EngineTest;
 
 { Exercises OfflineEngine against throw-away folders: a folder stands in for the OFFLINE drive, and the log
   goes to the work folder too, so no real drive or log is touched.
-  Usage: EngineTest <empty work folder>
+  Usage: EngineTest <empty work folder> [<the built checksum program, CheckStub.exe>]
   Builds with both Delphi (dcc64) and Free Pascal - see run-tests.cmd. }
 
 {$APPTYPE CONSOLE}
 {$IFDEF FPC}{$mode delphiunicode}{$H+}{$ENDIF}
 
 uses
-  Windows, SysUtils, Classes, OfflineEngine, Hashes, Digests, Checksums;
+  Windows, SysUtils, Classes, OfflineEngine, Hashes, Digests, Checksums, HashThreads;
 
 type
   THandlers = class
@@ -437,6 +437,7 @@ begin
 end;
 
 {$I ChecksumTests.inc}
+{$I ParallelTests.inc}
 
 procedure TestChecksums;
 var
@@ -1007,6 +1008,7 @@ begin
     Halt(2);
   end;
   Work := IncludeTrailingPathDelimiter(ParamStr(1));
+  StubExe := ParamStr(2);
   Drive := Work + 'FAKEDRIVE\';
   Mirror := Drive + SourceLetter(Work) + '-mirror\';
   ForceDirectories(Drive);
@@ -1126,6 +1128,7 @@ begin
   TestHashes;
   TestListFormats;
   TestMakeLists;
+  TestParallel;
   TestNoArchive;
   TestArchiveFolders;
 

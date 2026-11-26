@@ -3,7 +3,9 @@ program CheckStub;
 { The checksum program the Checksum Applet area of Offline Backup makes (from the Checksum Applet Creator's applet).
   Offline Backup copies this exe next to a checksum list, adds an icon and a small configuration resource (CHKCFG),
   and the result checks every file listed in the list. Plain Win32 API, no VCL or LCL, so it stays small. Hashing
-  runs on a worker thread; the UI never blocks. Builds with Delphi (delphiuild.cmd) and Free Pascal
+  runs on worker threads (HashThreads: several files at once, one on a spinning disk); the UI never blocks and
+  tallies the results in list order. /log=<file> runs without waiting and writes the report there;
+  /threads=<n> reads n files at once (for tests). Builds with Delphi (delphiuild.cmd) and Free Pascal
   (lazarusuild.cmd); each edition keeps its own build of it as the RCDATA resource CHECKSTUB. }
 
 {$APPTYPE GUI}
@@ -12,7 +14,7 @@ program CheckStub;
 {$Q-,R-,O+}
 
 uses
-  Windows, Messages, ShellAPI, CommCtrl, Hashes, Digests;
+  Windows, Messages, ShellAPI, CommCtrl, Hashes, Digests, HashThreads;
 
 {$IFDEF FPC}
 const
@@ -66,14 +68,17 @@ var
   Created: string;           // when the list was made, 'yyyy-mm-dd hh:nn' ('' for a program made before 0.11)
   Algo: THashAlgo;
   Entries: TDigestEntries;
-  Results: array of Byte;
+  Results: array of Byte;    // written by a worker before it sets ItemDone
+  ItemDone: array of LongInt; // 1 once the item's result is in Results (interlocked)
   Sizes: array of Int64;
+  Hashers: array of THasher; // one per worker
+  Bufs: array of Pointer;
   AbortFlag: LongInt;
   Running: Boolean;
   Interrupted: Boolean;
   WorkerDone: LongInt;
-  DoneCount: LongInt;        // written by worker
-  CurIndex: LongInt;         // written by worker
+  DoneCount: LongInt;        // UI side: the items done from the start of the list without a gap (= Scanned)
+  CurIndex: LongInt;         // written by workers: a file being read now
   BytesDone, TotalBytes: Int64;
   StartTick: UInt64;
   EndTick: UInt64;
@@ -255,21 +260,74 @@ end;
 
 { ------------------------------------------------------------------ worker }
 
-function Worker(Param: Pointer): {$IFDEF FPC}PtrInt{$ELSE}Integer{$ENDIF};
+type
+  TItemWork = class
+    procedure Item(Worker, I: Integer);
+  end;
+
+{ One file, on worker Worker (TParallelWork); a file cut short by Stop is left not done }
+procedure TItemWork.Item(Worker, I: Integer);
 var
   H: THasher;
   Buf: Pointer;
-  I: Integer;
   Hnd: THandle;
   Got: DWORD;
   Path: string;
   D: TDigest;
   Err: DWORD;
   Ok: Boolean;
-  FAD: TWin32FileAttributeData;
 begin
-  H := NewHasher(Algo);
-  GetMem(Buf, 1024 * 1024);
+  if AbortFlag <> 0 then Exit;
+  CurIndex := I;
+  H := Hashers[Worker];
+  Buf := Bufs[Worker];
+  Path := LongPath(BaseDir + Entries[I].Name);
+  Hnd := CreateFileW(PWideChar(Path), GENERIC_READ,
+    FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE, nil, OPEN_EXISTING,
+    FILE_FLAG_SEQUENTIAL_SCAN, 0);
+  if Hnd = INVALID_HANDLE_VALUE then
+  begin
+    Err := GetLastError;
+    if (Err = ERROR_FILE_NOT_FOUND) or (Err = ERROR_PATH_NOT_FOUND) then
+      Results[I] := ST_MISSING
+    else
+      Results[I] := ST_ERROR;
+  end
+  else
+  begin
+    H.Reset;
+    Ok := True;
+    while True do
+    begin
+      if AbortFlag <> 0 then Break;
+      if not ReadFile(Hnd, Buf^, 1024 * 1024, Got, nil) then
+      begin
+        Ok := False;
+        Break;
+      end;
+      if Got = 0 then Break;
+      H.Update(Buf, Got);
+      AddBytes(BytesDone, Got);
+    end;
+    CloseHandle(Hnd);
+    if AbortFlag <> 0 then Exit;
+    if not Ok then
+      Results[I] := ST_ERROR
+    else
+    begin
+      H.Final(D);
+      if DigestsEqual(D, Entries[I].Hash) then Results[I] := ST_OK else Results[I] := ST_BAD;
+    end;
+  end;
+  InterlockedExchange(ItemDone[I], 1);
+end;
+
+function Worker(Param: Pointer): {$IFDEF FPC}PtrInt{$ELSE}Integer{$ENDIF};
+var
+  I, Threads: Integer;
+  FAD: TWin32FileAttributeData;
+  Items: TItemWork;
+begin
   TotalBytes := 0;
   for I := 0 to High(Entries) do
   begin
@@ -280,52 +338,24 @@ begin
       Inc(TotalBytes, Sizes[I]);
     end;
   end;
-  for I := 0 to High(Entries) do
+  Threads := HashThreadCount(BaseDir);
+  if Threads > Length(Entries) then Threads := Length(Entries);
+  if Threads < 1 then Threads := 1;
+  SetLength(Hashers, Threads);
+  SetLength(Bufs, Threads);
+  for I := 0 to Threads - 1 do
   begin
-    if AbortFlag <> 0 then Break;
-    CurIndex := I;
-    Path := LongPath(BaseDir + Entries[I].Name);
-    Hnd := CreateFileW(PWideChar(Path), GENERIC_READ,
-      FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE, nil, OPEN_EXISTING,
-      FILE_FLAG_SEQUENTIAL_SCAN, 0);
-    if Hnd = INVALID_HANDLE_VALUE then
-    begin
-      Err := GetLastError;
-      if (Err = ERROR_FILE_NOT_FOUND) or (Err = ERROR_PATH_NOT_FOUND) then
-        Results[I] := ST_MISSING
-      else
-        Results[I] := ST_ERROR;
-    end
-    else
-    begin
-      H.Reset;
-      Ok := True;
-      while True do
-      begin
-        if AbortFlag <> 0 then Break;
-        if not ReadFile(Hnd, Buf^, 1024 * 1024, Got, nil) then
-        begin
-          Ok := False;
-          Break;
-        end;
-        if Got = 0 then Break;
-        H.Update(Buf, Got);
-        Inc(BytesDone, Got);
-      end;
-      CloseHandle(Hnd);
-      if AbortFlag <> 0 then Break;
-      if not Ok then
-        Results[I] := ST_ERROR
-      else
-      begin
-        H.Final(D);
-        if DigestsEqual(D, Entries[I].Hash) then Results[I] := ST_OK else Results[I] := ST_BAD;
-      end;
-    end;
-    DoneCount := I + 1;
+    Hashers[I] := NewHasher(Algo);
+    GetMem(Bufs[I], 1024 * 1024);
   end;
-  FreeMem(Buf);
-  H.Free;
+  Items := TItemWork.Create;
+  TParallelWork.Create(Length(Entries), Threads, Items.Item).Free;   // Free waits for every worker
+  Items.Free;
+  for I := 0 to Threads - 1 do
+  begin
+    FreeMem(Bufs[I]);
+    Hashers[I].Free;
+  end;
   Interrupted := AbortFlag <> 0;
   InterlockedExchange(WorkerDone, 1);
   PostMessage(Wnd, WM_ALLDONE, 0, 0);
@@ -346,9 +376,10 @@ begin
   end;
 end;
 
+{ Counts the results done since the last call, in list order: up to the first item still being read }
 procedure Tally;
 begin
-  while Scanned < DoneCount do
+  while (Scanned < Length(Entries)) and (ItemDone[Scanned] <> 0) do
   begin
     case Results[Scanned] of
       ST_OK: Inc(CntOK);
@@ -358,6 +389,7 @@ begin
     end;
     Inc(Scanned);
   end;
+  DoneCount := Scanned;
 end;
 
 procedure SetText(H: HWND; const T: string);
@@ -801,16 +833,19 @@ var
   ICC: TInitCommonControlsEx;
   IconBig, IconSmall: HICON;
   R: TRect;
-  I: Integer;
+  I, Code: Integer;
 begin
   for I := 1 to ParamCount do
     if (Copy(ParamStr(I), 1, 5) = '/log=') or (Copy(ParamStr(I), 1, 5) = '-log=') then
-      LogPath := Copy(ParamStr(I), 6, MaxInt);
+      LogPath := Copy(ParamStr(I), 6, MaxInt)
+    else if (Copy(ParamStr(I), 1, 9) = '/threads=') or (Copy(ParamStr(I), 1, 9) = '-threads=') then
+      Val(Copy(ParamStr(I), 10, MaxInt), HashThreadsOverride, Code);
   ICC.dwSize := SizeOf(ICC);
   ICC.dwICC := ICC_LISTVIEW_CLASSES or ICC_PROGRESS_CLASS or ICC_STANDARD_CLASSES;
   InitCommonControlsEx(ICC);
   LoadConfiguration;
   SetLength(Results, Length(Entries));
+  SetLength(ItemDone, Length(Entries));
   SetLength(Sizes, Length(Entries));
 
   IconBig := LoadImageW(HInstance, PWideChar(MakeIntResource(1)), IMAGE_ICON,

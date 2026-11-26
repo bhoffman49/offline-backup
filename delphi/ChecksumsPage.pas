@@ -9,7 +9,7 @@ interface
 
 uses
   Windows, SysUtils, Classes, UITypes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, CommCtrl,
-  ShellAPI, OfflineEngine, Hashes, Digests, Checksums;
+  ShellAPI, OfflineEngine, Hashes, Digests, Checksums, ReadingPanel;
 
 type
   TCheckListEvent = procedure(const ListFile: string) of object;
@@ -71,6 +71,7 @@ type
     FIcon: HICON;
     FJob: TChecksumJob;
     FThread: TChecksumThread;
+    FReading: TReadingPanel;          // the files being read now, over the file list while a list is made
     FListPath: string;                   // the list made last, for Check the list
     FBusy: Boolean;                      // a copy, verify or check runs in the main window
     FOnCheck: TCheckListEvent;
@@ -437,6 +438,16 @@ begin
   LabelStatus.Caption := 'Reading the files ...';
   FJob := TChecksumJob.Create(O, FFiles);
   FThread := TChecksumThread.Create(FJob);
+  // the files being read take the file list's place until the list is made
+  if FReading = nil then
+  begin
+    FReading := TReadingPanel.Create(Self);
+    FReading.Parent := ListFiles.Parent;
+  end;
+  FReading.BoundsRect := ListFiles.BoundsRect;
+  FReading.Anchors := ListFiles.Anchors;
+  ListFiles.Visible := False;
+  FReading.ShowFiles('Reading the files for their checksums.', nil);
   Timer.Enabled := True;
   UpdateButtons;
   if Assigned(FOnRunningChange) then FOnRunningChange(Self);
@@ -463,6 +474,7 @@ begin
     LabelStatus.Caption := Format('Reading file %s of %s (%s of %s):  %s', [FormatFloat('#,##0', I + 1),
       FormatFloat('#,##0', Length(FJob.Files)), FormatSize(FJob.BytesDone), FormatSize(FJob.BytesTotal),
       FJob.Files[I].RelName]);
+  if FReading <> nil then FReading.ShowFiles('Reading the files for their checksums.', FJob.ReadingNow);
   if FThread.Finished then Finish;
 end;
 
@@ -475,6 +487,8 @@ begin
   Timer.Enabled := False;
   FThread.WaitFor;
   FreeAndNil(FThread);
+  if FReading <> nil then FReading.Visible := False;
+  ListFiles.Visible := True;
   case FJob.Outcome of
     mkDone:
       begin

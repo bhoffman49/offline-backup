@@ -23,7 +23,8 @@ unit OfflineEngine;
   "md5 *path" format, so other tools (ExactFile, md5sum) can check the drive too. Verify re-reads every file on the
   drive, past the Windows cache, and compares - so a drive that has sat in a drawer can be checked without the PC's
   folders. CheckMd5 checks the files listed in any .md5 file - or any other checksum list Digests can read (.sha1,
-  .sha256, .sfv, ...), using the algorithms in Hashes.
+  .sha256, .sfv, ...), using the algorithms in Hashes; it reads several files at once (HashThreads) but logs and
+  counts them in list order.
 
   No UI code in here: the forms hook the events of TOfflineCopyThread, which runs them on the main thread. }
 
@@ -32,7 +33,7 @@ unit OfflineEngine;
 interface
 
 uses
-  Windows, SysUtils, Classes, Hashes, Digests;
+  Windows, SysUtils, Classes, Hashes, Digests, HashThreads;
 
 type
   // plain string arrays rather than TStringList: under Free Pascal TStringList is AnsiString and would
@@ -130,6 +131,12 @@ type
   TCopyResult = (crOk, crSkipped, crStopped, crFailed, crCancelled, crIncomplete);
 
   { Where a run has got to. Counts and bytes are for the whole run (all folders), like the progress bar. }
+  TReadingFile = record
+    Name: string;                // relative to the folder being read (the list's folder, the drive, the source)
+    Size, Done: Int64;           // bytes, and how many of them have been read
+  end;
+  TReadingFiles = array of TReadingFile;
+
   TCopyProgress = record
     Status: string;              // 'Checking what has changed ...', 'Copying Backups  (folder 1 of 3)'
     Folder: string;              // folder being copied, '' while checking
@@ -162,6 +169,9 @@ type
     Verifying: Boolean;
     // a CheckMd5 run: Errors = bad or unreadable, Skipped = missing
     Checking: Boolean;
+    // the files being read right now (an MD5 check, Verify and recording checksums read several at once), biggest
+    // first, at most MaxReading; empty between files and outside those steps
+    Reading: TReadingFiles;
   end;
 
   // one line of an .md5 file, after checking
@@ -180,6 +190,10 @@ type
   TPreviewEvent = procedure(const P: TCopyPreview; var GoAhead: Boolean) of object;
   // a source folder is not there: Skip = True copies the others, False stops the run (the default)
   TMissingEvent = procedure(const Path: string; var Skip: Boolean) of object;
+
+  // how reading several files at once counts its bytes: as BytesCopied (MD5 check, Verify) or HashBytesDone
+  // (recording checksums after a copy)
+  TParMode = (pmBytes, pmHash);
 
   { One full run against one drive. Run blocks - call it from a worker thread (TOfflineCopyThread). }
   TOfflineCopy = class
@@ -206,6 +220,27 @@ type
     FVeraCrypt: Boolean;
     FDismounted: Boolean;
     FChecksumsSkipped: Boolean;  // RecordChecksums is off and files were copied without one
+    // reading several files at once (ParStart / ParNext / ParEnd, for CheckMd5, Verify and RecordChecksums): per
+    // item its path and size (-1: don't read it) and what its worker found - FParDone[I] is set (interlocked) last,
+    // once FParOk/FParCrc/FParMd5/FParDigest hold the answer; per worker the item it is on (-1: none) and how far
+    FParWork: TParallelWork;
+    FParMode: TParMode;
+    FParAlgo: THashAlgo;
+    FParNoCache: Boolean;
+    FParPaths: TPathList;
+    FParRoot: string;            // left off the front of the paths in Reading
+    FParSizes: array of Int64;
+    FParOk: array of Boolean;
+    FParCrc: array of Cardinal;
+    FParMd5: TPathList;
+    FParDigest: array of TDigest;
+    FParDone: array of LongInt;
+    FParNext: Integer;           // the next item ParNext hands back
+    FSlotItem: array of LongInt;
+    FSlotDone: array of Int64;
+    FParBytes: Int64;            // bytes read by all workers (interlocked)
+    FParBase: Int64;             // the progress byte count when ParStart was called
+    FChkEntries: TDigestEntries; // CheckMd5: the list's lines
     function DoRun: TCopyResult;
     procedure MoveRemovedFolders(const Archive: string);
     procedure MoveOldVersions;
@@ -224,14 +259,21 @@ type
     procedure RecordChecksums(const Folder, Src, Dest: string; Plan: TCopyPlan);
     procedure FindMoves(const Src: TBackupSource; Plan: TCopyPlan);
     procedure DoMoves(const Src: TBackupSource; Plan: TCopyPlan);
-    procedure CountBytes(N: Int64);
-    procedure HashBytes(N: Int64);
+    procedure ParStart(const Paths: TPathList; const Sizes: array of Int64; const Root: string; Mode: TParMode;
+      Algo: THashAlgo; NoCache: Boolean; Threads: Integer);
+    function ParNext(out Index: Integer): Boolean;
+    procedure ParEnd;
+    procedure ParRead(Worker, Index: Integer);
+    procedure ParBytes(N: Int64);
+    procedure ParTick;
+    procedure UpdateReading;
     procedure HashReport(Always: Boolean);
   public
     AllowFolderTarget: Boolean;  // tests only: lets Drive be a plain folder instead of an OFFLINE-x drive
     AssumeYes: Boolean;          // skip the brake question (like the script's -Yes)
     CheckItems: TCheckItems;     // filled by CheckMd5
     CheckAlgo: THashAlgo;        // ... and the algorithm of the list it checked
+    CheckSeconds: Double;        // ... and how long the check took (from the first file read to the last)
     // why a run ended crSkipped, in a few words for the end-of-run window; NothingChosen: all folders unticked,
     // which is the user's choice and not a problem
     SkipReason: string;
@@ -302,6 +344,8 @@ type
     property OnPreview: TPreviewEvent read FOnPreview write FOnPreview;
   end;
 
+// the biggest first, then at most MaxReading of them
+procedure SortReading(var R: TReadingFiles);
 function PreviewKindText(K: TPreviewKind): string;   // 'Files to add', ...
 // the red text at the top of the preview: the safety check and/or the folders that are not archived; '' if neither
 function PreviewWarningText(const P: TCopyPreview): string;
@@ -310,7 +354,8 @@ function ArchiveFolderName(When: TDateTime): string;
 // is this the name of a day's folder in ARCHIVE ('112326')? When: its day
 function IsArchiveName(const S: string; out When: TDateTime): Boolean;
 const
-  AppVersion = '0.11.0';         // shown in the window title; make-release.cmd reads it from this line
+  MaxReading = 8;                // TCopyProgress.Reading holds at most this many files
+  AppVersion = '0.12.0';         // shown in the window title; make-release.cmd reads it from this line
 
 function DefaultSettings: TBackupSettings;
 // settings file: OfflineBackup.ini next to the exe (each edition has its own), or in %APPDATA%\OfflineBackup\
@@ -1482,7 +1527,7 @@ begin
   Md5 := '';
   Flags := FILE_FLAG_SEQUENTIAL_SCAN;
   if NoCache then Flags := Flags or FILE_FLAG_NO_BUFFERING;   // needs a sector-aligned buffer: VirtualAlloc gives one
-  H := CreateFileW(PWideChar(Path), GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, Flags, 0);
+  H := CreateFileW(PWideChar(ExtendedPath(Path)), GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, Flags, 0);
   if H = INVALID_HANDLE_VALUE then Exit;
   Buf := VirtualAlloc(nil, CrcBufSize, MEM_COMMIT, PAGE_READWRITE);
   try
@@ -1522,7 +1567,7 @@ begin
   D.Len := 0;
   Flags := FILE_FLAG_SEQUENTIAL_SCAN;
   if NoCache then Flags := Flags or FILE_FLAG_NO_BUFFERING;
-  H := CreateFileW(PWideChar(Path), GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, Flags, 0);
+  H := CreateFileW(PWideChar(ExtendedPath(Path)), GENERIC_READ, FILE_SHARE_READ, nil, OPEN_EXISTING, Flags, 0);
   if H = INVALID_HANDLE_VALUE then Exit;
   Buf := VirtualAlloc(nil, CrcBufSize, MEM_COMMIT, PAGE_READWRITE);
   Hasher := NewHasher(Algo);
@@ -1581,7 +1626,7 @@ var
 begin
   Size := -1;
   Time := 0;
-  H := FindFirstFileW(PWideChar(Path), FD);
+  H := FindFirstFileW(PWideChar(ExtendedPath(Path)), FD);
   Result := H <> INVALID_HANDLE_VALUE;
   if not Result then Exit;
   Windows.FindClose(H);
@@ -2760,24 +2805,31 @@ begin
   end;
 end;
 
+{ ', 18 files at a time' for the log when several files are read at once, '' for one }
+function ThreadsNote(Threads: Integer): string;
+begin
+  if Threads > 1 then Result := ', ' + IntToStr(Threads) + ' files at a time' else Result := '';
+end;
+
 { After a folder is copied: the CRC32 of each file robocopy copied, read from the source and kept only if the source
   still has the size and time the drive copy has (a file changed during the copy gets no checksum until next time).
   Files robocopy deleted from the drive leave the list. }
 procedure TOfflineCopy.RecordChecksums(const Folder, Src, Dest: string; Plan: TCopyPlan);
 var
-  ListFile, SrcRoot, DestRoot, Rel, Md5: string;
+  ListFile, SrcRoot, DestRoot, Rel: string;
   Old, New, Added, DelFiles: TCrcList;
   DelDirs: TPathList;
-  Crc: Cardinal;
   SSize, STime, DSize, DTime: Int64;
   I, J, N: Integer;
   Gone: Boolean;
   Sizes: array of Int64;        // of the copied files, for the progress
 
-  { Reads each copied file again from the source for its CRC32 and MD5 - into Added }
+  { Reads each copied file again from the source for its CRC32 and MD5 - into Added. Several files are read at once
+    (through the Windows cache, as before) and added in list order. }
   procedure HashCopied;
   var
-    I: Integer;
+    I, Threads: Integer;
+    Paths: TPathList;
   begin
     FProgress.Status := 'Recording checksums for ' + FProgress.Folder + ' (' + IntToStr(Length(FCopied)) + ' files)';
     // how much there is to read, so the window can show how far it is and how long it will take
@@ -2797,27 +2849,33 @@ var
       Inc(FProgress.HashFiles);
       Inc(FProgress.HashBytes, Sizes[I]);
     end;
+    // files outside the source folder are not read (size -1)
+    SetLength(Paths, Length(FCopied));
+    for I := 0 to High(FCopied) do
+    begin
+      Paths[I] := FCopied[I];
+      if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Sizes[I] := -1;
+    end;
+    Threads := HashThreadCount(SrcRoot);
     FHashStarted := Now;
     HashReport(True);
+    ParStart(Paths, Sizes, SrcRoot, pmHash, haMD5, False, Threads);
     try
-      for I := 0 to High(FCopied) do
+      while ParNext(I) do
       begin
-        if FCancelled then Exit;
-        if not SameText(Copy(FCopied[I], 1, Length(SrcRoot)), SrcRoot) then Continue;
+        if Sizes[I] < 0 then Continue;
         Rel := Copy(FCopied[I], Length(SrcRoot) + 1, MaxInt);
-        FProgress.CurrentFile := FCopied[I];
-        FProgress.CurrentFileSize := Sizes[I];
-        FProgress.CurrentFileDone := 0;
-        if FileSums(FCopied[I], False, Crc, Md5, HashBytes, @FCancelled) and FileStamp(FCopied[I], SSize, STime) and
+        if FParOk[I] and FileStamp(FCopied[I], SSize, STime) and
            FileStamp(DestRoot + Rel, DSize, DTime) and (SSize = DSize) and SameFileTime(STime, DTime) then
         begin
           SetLength(Added, Length(Added) + 1);
-          Added[High(Added)] := CrcEntry(Rel, Crc, Md5, DSize, DTime);
+          Added[High(Added)] := CrcEntry(Rel, FParCrc[I], FParMd5[I], DSize, DTime);
         end;
         Inc(FProgress.HashFilesDone);
         HashReport(False);
       end;
     finally
+      ParEnd;
       FProgress.Hashing := False;
       FProgress.CurrentFile := '';
       FProgress.CurrentFileSize := 0;
@@ -2890,15 +2948,6 @@ begin
   if Result < 1 then Result := 1;
 end;
 
-{ Bytes read for the checksums (FileSums' progress) }
-procedure TOfflineCopy.HashBytes(N: Int64);
-begin
-  Inc(FProgress.HashBytesDone, N);
-  Inc(FProgress.CurrentFileDone, N);
-  if FProgress.CurrentFileDone > FProgress.CurrentFileSize then FProgress.CurrentFileDone := FProgress.CurrentFileSize;
-  HashReport(False);
-end;
-
 { The checksums' rate and time left, passed on at most twice a second (Always: now) }
 procedure TOfflineCopy.HashReport(Always: Boolean);
 var
@@ -2918,20 +2967,6 @@ begin
   Report;
 end;
 
-procedure TOfflineCopy.CountBytes(N: Int64);
-var
-  T: DWORD;
-begin
-  Inc(FProgress.BytesCopied, N);
-  T := GetTickCount;
-  if T - FLastReport >= 500 then
-  begin
-    FLastReport := T;
-    if FCopyStarted > 0 then FProgress.Speed := Round(FProgress.BytesCopied / Seconds(FCopyStarted));
-    Report;
-  end;
-end;
-
 { Sets a file's last-write time to 1990, so robocopy sees it as older than the source and copies it again }
 function MarkForRecopy(const Path: string): Boolean;
 var
@@ -2942,7 +2977,7 @@ begin
   T := Int64(Trunc(EncodeDate(1990, 1, 1) - EncodeDate(1601, 1, 1))) * 864000000000;
   FT.dwLowDateTime := DWORD(T and $FFFFFFFF);
   FT.dwHighDateTime := DWORD(T shr 32);
-  H := CreateFileW(PWideChar(Path), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nil, OPEN_EXISTING, 0, 0);
+  H := CreateFileW(PWideChar(ExtendedPath(Path)), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nil, OPEN_EXISTING, 0, 0);
   Result := H <> INVALID_HANDLE_VALUE;
   if not Result then Exit;
   Result := SetFileTime(H, nil, nil, @FT);
@@ -2963,10 +2998,12 @@ var
   Crc: Cardinal;
   Md5: string;
   Size, Time: Int64;
-  I, J, K, Good, Bad, Recorded, NewCount: Integer;
+  I, J, K, Good, Bad, Recorded, NewCount, Threads: Integer;
   Total: Int64;
   Run: TDriveRun;
   Names: string;
+  Paths: TPathList;
+  Sizes: array of Int64;
 
   procedure Scan(const Root, Sub: string; Idx: Integer);
   var
@@ -2974,7 +3011,7 @@ var
     FD: TWin32FindDataW;
     Name: string;
   begin
-    H := FindFirstFileW(PWideChar(Root + Sub + '*'), FD);
+    H := FindFirstFileW(PWideChar(ExtendedPath(Root + Sub + '*')), FD);
     if H = INVALID_HANDLE_VALUE then Exit;
     try
       repeat
@@ -3028,8 +3065,9 @@ begin
     for I := 0 to High(Folders) do Scan(Dirs[I], '', I);
     for I := 0 to High(Files) do Inc(FProgress.FilesTotal, Length(Files[I]));
     FProgress.BytesTotal := Total;
+    Threads := HashThreadCount(FDrive);
     Log(Format('%s: verifying %d files (%s) in %d folder(s)', [DriveTag, FProgress.FilesTotal, FormatSize(Total),
-      Length(Folders)]));
+      Length(Folders)]) + ThreadsNote(Threads));
 
     Good := 0;
     Bad := 0;
@@ -3046,58 +3084,71 @@ begin
       Old := LoadCrcList(FDrive + ChecksumDir + '\' + MirrorFolder(Folders[I]) + '.crc');
       SetLength(New, Length(Files[I]));
       NewCount := 0;
+      // the folder's files are read several at once (past the Windows cache) and tallied here in order
+      SetLength(Paths, Length(Files[I]));
+      SetLength(Sizes, Length(Files[I]));
       for J := 0 to High(Files[I]) do
       begin
-        if FCancelled then Break;
-        if not FileSums(Dirs[I] + Files[I][J].Rel, True, Crc, Md5, CountBytes, @FCancelled) or
-           not FileStamp(Dirs[I] + Files[I][J].Rel, Size, Time) then
+        Paths[J] := Dirs[I] + Files[I][J].Rel;
+        Sizes[J] := Files[I][J].Size;
+      end;
+      ParStart(Paths, Sizes, FDrive, pmBytes, haMD5, True, Threads);
+      try
+        while ParNext(J) do
         begin
-          if FCancelled then Break;
-          Inc(Bad);
-          Inc(FProgress.Errors);
-          Inc(FProgress.ErrorBytes, Files[I][J].Size);
-          Log('  could not read ' + MirrorFolder(Folders[I]) + '\' + Files[I][J].Rel);
-          K := FindCrc(Old, UpperCase(Files[I][J].Rel));
-          if K >= 0 then
+          Crc := FParCrc[J];
+          Md5 := FParMd5[J];
+          if not FParOk[J] or not FileStamp(Dirs[I] + Files[I][J].Rel, Size, Time) then
           begin
-            New[NewCount] := Old[K];      // keep its checksum for the next try
-            Inc(NewCount);
-          end;
-        end
-        else
-        begin
-          K := FindCrc(Old, UpperCase(Files[I][J].Rel));
-          if (K >= 0) and (Old[K].Size = Size) and (Old[K].Time = Time) then
-          begin
-            if (Old[K].Crc = Crc) and ((Old[K].Md5 = '') or (Old[K].Md5 = Md5)) then
+            if FCancelled then Break;
+            Inc(Bad);
+            Inc(FProgress.Errors);
+            Inc(FProgress.ErrorBytes, Files[I][J].Size);
+            Log('  could not read ' + MirrorFolder(Folders[I]) + '\' + Files[I][J].Rel);
+            K := FindCrc(Old, UpperCase(Files[I][J].Rel));
+            if K >= 0 then
             begin
-              Inc(Good);
-              New[NewCount] := Old[K];
-              New[NewCount].Md5 := Md5;     // lists from before MD5s get them now
-            end
-            else
-            begin
-              Inc(Bad);
-              Inc(FProgress.Errors);
-              Inc(FProgress.ErrorBytes, Size);
-              Log('  BAD: ' + MirrorFolder(Folders[I]) + '\' + Files[I][J].Rel + ' - does not match its checksum');
-              // same size and time, so robocopy would never replace it: date it back so the next copy does
-              if MarkForRecopy(Dirs[I] + Files[I][J].Rel) then Log('    it will be copied again at the next copy');
-              Dec(NewCount);                // no checksum kept for it - the next copy records a fresh one
+              New[NewCount] := Old[K];      // keep its checksum for the next try
+              Inc(NewCount);
             end;
           end
           else
           begin
-            // no checksum yet (copied before checksums, or changed since): record what is there now
-            Inc(Recorded);
-            Inc(FProgress.Skipped);
-            Inc(FProgress.SkippedBytes, Size);
-            New[NewCount] := CrcEntry(Files[I][J].Rel, Crc, Md5, Size, Time);
+            K := FindCrc(Old, UpperCase(Files[I][J].Rel));
+            if (K >= 0) and (Old[K].Size = Size) and (Old[K].Time = Time) then
+            begin
+              if (Old[K].Crc = Crc) and ((Old[K].Md5 = '') or (Old[K].Md5 = Md5)) then
+              begin
+                Inc(Good);
+                New[NewCount] := Old[K];
+                New[NewCount].Md5 := Md5;     // lists from before MD5s get them now
+              end
+              else
+              begin
+                Inc(Bad);
+                Inc(FProgress.Errors);
+                Inc(FProgress.ErrorBytes, Size);
+                Log('  BAD: ' + MirrorFolder(Folders[I]) + '\' + Files[I][J].Rel + ' - does not match its checksum');
+                // same size and time, so robocopy would never replace it: date it back so the next copy does
+                if MarkForRecopy(Dirs[I] + Files[I][J].Rel) then Log('    it will be copied again at the next copy');
+                Dec(NewCount);                // no checksum kept for it - the next copy records a fresh one
+              end;
+            end
+            else
+            begin
+              // no checksum yet (copied before checksums, or changed since): record what is there now
+              Inc(Recorded);
+              Inc(FProgress.Skipped);
+              Inc(FProgress.SkippedBytes, Size);
+              New[NewCount] := CrcEntry(Files[I][J].Rel, Crc, Md5, Size, Time);
+            end;
+            Inc(NewCount);
           end;
-          Inc(NewCount);
+          Inc(FProgress.FilesDone);
+          Inc(FProgress.FilesDoneBytes, Files[I][J].Size);
         end;
-        Inc(FProgress.FilesDone);
-        Inc(FProgress.FilesDoneBytes, Files[I][J].Size);
+      finally
+        ParEnd;
       end;
       // a cancelled folder keeps its old list; files no longer on the drive drop out of a finished one
       if not FCancelled then
@@ -3151,18 +3202,222 @@ begin
   end;
 end;
 
+{ ---------------------------------------------------------------- reading several files at once
+
+  ParStart starts the workers (HashThreads) on Paths; ParNext hands back the items in list order, each once it has been
+  read (waiting for it meanwhile, and keeping the progress up to date); ParEnd stops and waits for them. The tally
+  stays in the caller, on this thread, so logs and counts come out as they did with one file at a time. }
+
+threadvar
+  ParSlot: Integer;              // the worker this thread is (ParRead sets it, ParBytes uses it)
+
+procedure TOfflineCopy.ParStart(const Paths: TPathList; const Sizes: array of Int64; const Root: string;
+  Mode: TParMode; Algo: THashAlgo; NoCache: Boolean; Threads: Integer);
+var
+  I, N: Integer;
+begin
+  N := Length(Paths);
+  FParMode := Mode;
+  FParAlgo := Algo;
+  FParNoCache := NoCache;
+  FParPaths := Paths;
+  FParRoot := Root;
+  SetLength(FParSizes, N);
+  for I := 0 to N - 1 do FParSizes[I] := Sizes[I];
+  SetLength(FParOk, N);
+  SetLength(FParCrc, N);
+  SetLength(FParMd5, N);
+  SetLength(FParDigest, N);
+  SetLength(FParDone, N);
+  for I := 0 to N - 1 do FParDone[I] := 0;
+  if Threads > N then Threads := N;
+  if Threads < 1 then Threads := 1;
+  SetLength(FSlotItem, Threads);
+  SetLength(FSlotDone, Threads);
+  for I := 0 to Threads - 1 do
+  begin
+    FSlotItem[I] := -1;
+    FSlotDone[I] := 0;
+  end;
+  FParNext := 0;
+  FParBytes := 0;
+  if Mode = pmHash then FParBase := FProgress.HashBytesDone else FParBase := FProgress.BytesCopied;
+  FParWork := TParallelWork.Create(N, Threads, ParRead);
+end;
+
+function TOfflineCopy.ParNext(out Index: Integer): Boolean;
+var
+  Finished: Boolean;
+begin
+  Result := False;
+  Index := -1;
+  while not FCancelled and (FParNext < Length(FParDone)) do
+  begin
+    if FParDone[FParNext] <> 0 then
+    begin
+      Index := FParNext;
+      Inc(FParNext);
+      ParTick;
+      Exit(True);
+    end;
+    Finished := FParWork.WaitFor(50);
+    ParTick;
+    // every worker has ended without this item: only when cancelled
+    if Finished and (FParDone[FParNext] = 0) then Exit;
+  end;
+end;
+
+procedure TOfflineCopy.ParEnd;
+begin
+  if FParWork <> nil then
+  begin
+    FParWork.Stop;
+    FParWork.Free;               // waits for the workers (a cancelled read stops at its next 1 MB)
+    FParWork := nil;
+  end;
+  if FParMode = pmHash then FProgress.HashBytesDone := FParBase + FParBytes
+  else FProgress.BytesCopied := FParBase + FParBytes;
+  FParPaths := nil;
+  FParSizes := nil;
+  FParOk := nil;
+  FParCrc := nil;
+  FParMd5 := nil;
+  FParDigest := nil;
+  FParDone := nil;
+  FSlotItem := nil;
+  FSlotDone := nil;
+  FProgress.Reading := nil;
+end;
+
+{ One item, on a worker: its CRC32 + MD5 (FileSums), or with another algorithm its checksum (FileDigest). Items with
+  size -1 (missing) are not opened. }
+procedure TOfflineCopy.ParRead(Worker, Index: Integer);
+var
+  Ok: Boolean;
+  Crc: Cardinal;
+  Md5: string;
+begin
+  ParSlot := Worker;
+  FSlotDone[Worker] := 0;
+  InterlockedExchange(FSlotItem[Worker], Index);
+  Ok := False;
+  try
+    if not FCancelled and (FParSizes[Index] >= 0) then
+      if FParAlgo = haMD5 then           // the engine's own CRC32 + MD5 in one read is the quicker one
+      begin
+        Ok := FileSums(FParPaths[Index], FParNoCache, Crc, Md5, ParBytes, @FCancelled);
+        FParCrc[Index] := Crc;
+        FParMd5[Index] := Md5;
+      end
+      else
+        Ok := FileDigest(FParPaths[Index], FParAlgo, FParNoCache, FParDigest[Index], ParBytes, @FCancelled);
+  finally
+    FParOk[Index] := Ok;
+    InterlockedExchange(FSlotItem[Worker], -1);
+    InterlockedExchange(FParDone[Index], 1);
+  end;
+end;
+
+{ Bytes read by a worker }
+procedure TOfflineCopy.ParBytes(N: Int64);
+begin
+  AddBytes(FParBytes, N);
+  Inc(FSlotDone[ParSlot], N);    // only this worker writes its slot
+end;
+
+{ The bytes the workers have read, and now and then the rate, the files being read and a progress report }
+procedure TOfflineCopy.ParTick;
+var
+  T: DWORD;
+begin
+  if FParMode = pmHash then
+  begin
+    FProgress.HashBytesDone := FParBase + FParBytes;
+    if FProgress.HashBytesDone > FProgress.HashBytes then FProgress.HashBytesDone := FProgress.HashBytes;
+    if GetTickCount - FLastReport >= 500 then UpdateReading;
+    HashReport(False);
+    Exit;
+  end;
+  FProgress.BytesCopied := FParBase + FParBytes;
+  T := GetTickCount;
+  if T - FLastReport < 500 then Exit;
+  FLastReport := T;
+  if FCopyStarted > 0 then FProgress.Speed := Round(FProgress.BytesCopied / Seconds(FCopyStarted));
+  UpdateReading;
+  Report;
+end;
+
+procedure SortReading(var R: TReadingFiles);
+var
+  Tmp: TReadingFile;
+  I, J: Integer;
+begin
+  for I := 1 to High(R) do                // a handful of files: insertion sort
+  begin
+    Tmp := R[I];
+    J := I - 1;
+    while (J >= 0) and (R[J].Size < Tmp.Size) do
+    begin
+      R[J + 1] := R[J];
+      Dec(J);
+    end;
+    R[J + 1] := Tmp;
+  end;
+  if Length(R) > MaxReading then SetLength(R, MaxReading);
+end;
+
+{ FProgress.Reading from what each worker is on: the biggest files first, at most MaxReading. Recording checksums
+  also shows the biggest one as the current file, as it did. }
+procedure TOfflineCopy.UpdateReading;
+var
+  R: TReadingFiles;
+  W, Item, N: Integer;
+begin
+  R := nil;
+  N := 0;
+  for W := 0 to High(FSlotItem) do
+  begin
+    Item := FSlotItem[W];
+    if (Item < 0) or (Item > High(FParPaths)) then Continue;
+    SetLength(R, N + 1);
+    R[N].Name := FParPaths[Item];
+    if (FParRoot <> '') and SameText(Copy(R[N].Name, 1, Length(FParRoot)), FParRoot) then
+      R[N].Name := Copy(R[N].Name, Length(FParRoot) + 1, MaxInt);
+    R[N].Size := FParSizes[Item];
+    R[N].Done := FSlotDone[W];
+    if R[N].Done > R[N].Size then R[N].Done := R[N].Size;
+    if R[N].Done < 0 then R[N].Done := 0;
+    Inc(N);
+  end;
+  SortReading(R);
+  FProgress.Reading := R;
+  if FParMode = pmHash then
+    if N > 0 then
+    begin
+      FProgress.CurrentFile := R[0].Name;
+      FProgress.CurrentFileSize := R[0].Size;
+      FProgress.CurrentFileDone := R[0].Done;
+    end
+    else
+    begin
+      FProgress.CurrentFile := '';
+      FProgress.CurrentFileSize := 0;
+      FProgress.CurrentFileDone := 0;
+    end;
+end;
+
 function TOfflineCopy.CheckMd5(const FileName: string): TCopyResult;
 var
-  Entries: TDigestEntries;         // the list's lines: the checksum of each item, same order as CheckItems
-  Text, Base, Path, Md5: string;
-  Crc: Cardinal;
-  D: TDigest;
+  Text, Base: string;
+  Paths: TPathList;
+  Sizes: array of Int64;
   Size, Time: Int64;
-  I, Bad, Missing: Integer;
-  Read, Match: Boolean;
+  I, Bad, Missing, Threads: Integer;
+  Match: Boolean;
 begin
   Result := crFailed;
   CheckItems := nil;
+  CheckSeconds := 0;
   try
     FProgress := Default(TCopyProgress);
     FProgress.Checking := True;
@@ -3185,27 +3440,33 @@ begin
     end;
     // "md5 *path" (binary, what ExactFile and we write), "md5  path" (md5sum text mode), BSD "MD5 (path) = md5" and
     // SFV "path crc" lines; ; and # are comments
-    ParseDigest(Text, CheckAlgo, Entries);
-    SetLength(CheckItems, Length(Entries));
-    for I := 0 to High(Entries) do
-      CheckItems[I].Path := Entries[I].Name;
+    ParseDigest(Text, CheckAlgo, FChkEntries);
+    SetLength(CheckItems, Length(FChkEntries));
+    SetLength(Paths, Length(FChkEntries));
+    SetLength(Sizes, Length(FChkEntries));
+    for I := 0 to High(FChkEntries) do
+      CheckItems[I].Path := FChkEntries[I].Name;
     FProgress.FilesTotal := Length(CheckItems);
     for I := 0 to High(CheckItems) do
     begin
-      if (System.Pos(':', CheckItems[I].Path) > 0) or (Copy(CheckItems[I].Path, 1, 2) = '\\') then
-        Path := CheckItems[I].Path
+      if (System.Pos(':', CheckItems[I].Path) > 0) or (Copy(CheckItems[I].Path, 1, 2) = '\') then
+        Paths[I] := CheckItems[I].Path
       else
-        Path := Base + CheckItems[I].Path;
-      if FileStamp(Path, Size, Time) then
+        Paths[I] := Base + CheckItems[I].Path;
+      if FileStamp(Paths[I], Size, Time) then
       begin
         CheckItems[I].Size := Size;
         Inc(FProgress.BytesTotal, Size);
       end
       else
         CheckItems[I].Size := -1;
+      Sizes[I] := CheckItems[I].Size;   // -1: missing, not read
     end;
+    Threads := HashThreadCount(Base);
+    if Threads > Length(CheckItems) then Threads := Length(CheckItems);
+    if Threads < 1 then Threads := 1;
     Log(Format('%s: checking %d files (%s) against %s', [ParentDir(FileName), FProgress.FilesTotal,
-      FormatSize(FProgress.BytesTotal), ExtractFileName(FileName)]));
+      FormatSize(FProgress.BytesTotal), ExtractFileName(FileName)]) + ThreadsNote(Threads));
 
     Bad := 0;
     Missing := 0;
@@ -3213,53 +3474,45 @@ begin
     FLastReport := 0;
     FProgress.Status := 'Checking ' + ExtractFileName(FileName);
     FProgress.Folder := ExtractFileName(FileName);     // the window shows the counts lines once Folder is set
-    for I := 0 to High(CheckItems) do
-    begin
-      if FCancelled then Break;
-      if (System.Pos(':', CheckItems[I].Path) > 0) or (Copy(CheckItems[I].Path, 1, 2) = '\\') then
-        Path := CheckItems[I].Path
-      else
-        Path := Base + CheckItems[I].Path;
-      Read := False;
-      Match := False;
-      if CheckItems[I].Size >= 0 then
-        if CheckAlgo = haMD5 then          // the engine's own MD5 is the quicker one
+    // the workers read the files (past the Windows cache); here they are logged and counted in list order
+    ParStart(Paths, Sizes, Base, pmBytes, CheckAlgo, True, Threads);
+    try
+      while ParNext(I) do
+      begin
+        if CheckAlgo = haMD5 then Match := FParOk[I] and (FParMd5[I] = DigestToHex(FChkEntries[I].Hash))
+        else Match := FParOk[I] and DigestsEqual(FParDigest[I], FChkEntries[I].Hash);
+        if CheckItems[I].Size < 0 then
         begin
-          Read := FileSums(Path, True, Crc, Md5, CountBytes, @FCancelled);
-          Match := Read and (Md5 = DigestToHex(Entries[I].Hash));
+          CheckItems[I].Status := csMissing;
+          Inc(Missing);
+          Inc(FProgress.Skipped);
+          Log('  missing: ' + CheckItems[I].Path);
+        end
+        else if not FParOk[I] then
+        begin
+          if FCancelled then Break;
+          CheckItems[I].Status := csUnreadable;
+          Inc(Bad);
+          Inc(FProgress.Errors);
+          Log('  could not read: ' + CheckItems[I].Path);
+        end
+        else if not Match then
+        begin
+          CheckItems[I].Status := csBad;
+          Inc(Bad);
+          Inc(FProgress.Errors);
+          Log('  BAD: ' + CheckItems[I].Path + ' - does not match its ' + HashNames[CheckAlgo]);
         end
         else
-        begin
-          Read := FileDigest(Path, CheckAlgo, True, D, CountBytes, @FCancelled);
-          Match := Read and DigestsEqual(D, Entries[I].Hash);
-        end;
-      if CheckItems[I].Size < 0 then
-      begin
-        CheckItems[I].Status := csMissing;
-        Inc(Missing);
-        Inc(FProgress.Skipped);
-        Log('  missing: ' + CheckItems[I].Path);
-      end
-      else if not Read then
-      begin
-        if FCancelled then Break;
-        CheckItems[I].Status := csUnreadable;
-        Inc(Bad);
-        Inc(FProgress.Errors);
-        Log('  could not read: ' + CheckItems[I].Path);
-      end
-      else if not Match then
-      begin
-        CheckItems[I].Status := csBad;
-        Inc(Bad);
-        Inc(FProgress.Errors);
-        Log('  BAD: ' + CheckItems[I].Path + ' - does not match its ' + HashNames[CheckAlgo]);
-      end
-      else
-        CheckItems[I].Status := csOk;
-      Inc(FProgress.FilesDone);
-      if CheckItems[I].Size > 0 then Inc(FProgress.FilesDoneBytes, CheckItems[I].Size);
+          CheckItems[I].Status := csOk;
+        Inc(FProgress.FilesDone);
+        if CheckItems[I].Size > 0 then Inc(FProgress.FilesDoneBytes, CheckItems[I].Size);
+      end;
+    finally
+      ParEnd;
+      FChkEntries := nil;
     end;
+    CheckSeconds := (Now - FCopyStarted) * 86400;
     if FCopyStarted > 0 then FProgress.Speed := Round(FProgress.BytesCopied / Seconds(FCopyStarted));
     Report;
     if FCancelled then

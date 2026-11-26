@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0 - 2026-11-25
+
+- **Checksums are read several files at once**, like ExactFile: making a list in the **Checksum Applet**, the **MD5
+  check** page, **Verify drive**, recording the checksums after a copy, and the `checksum.exe` the Checksum Applet
+  makes. As many files are read at the same time as the PC has logical
+  processors, less two (so the PC stays usable; the readers also run at a lower priority), and one at a time on a
+  drive that says it is a spinning disk. Lists, reports and the log come out exactly as before, in list order. On
+  this PC (20 logical processors, NVMe SSD, 6,000 files / 9 GB, MD5) the MD5 check went from 38 s to 6 s and the
+  Checksum Applet list from 27 s to 3 s; a USB drive is mostly limited by the drive itself. The copy itself is
+  still robocopy, one file at a time.
+- **The files being read right now** are shown under the drive list during an MD5 check, Verify drive and recording
+  checksums: each with a bar of how far it is, the biggest first, as many as fit.
+- **Time taken** on the MD5 check page's Summary tab, with how much was read and how fast.
+- The log lines of an MD5 check and Verify drive say how many files were read at once.
+- Fixed: files with paths longer than 260 characters could not be read by Verify drive, the MD5 check, recording
+  checksums or the Checksum Applet (robocopy copied them fine), and a list made for a whole drive also listed
+  Windows' hidden `$RECYCLE.BIN` and `System Volume Information` folders.
+
 ## 0.11.0 - 2026-11-24
 
 - **Checksum Applet**, a new area at the bottom of the sidebar (from the Checksum Applet Creator): makes a checksum list

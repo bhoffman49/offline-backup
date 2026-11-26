@@ -13,7 +13,7 @@ unit Checksums;
 interface
 
 uses
-  Windows, SysUtils, Classes, Hashes, Digests, OfflineEngine;
+  Windows, SysUtils, Classes, Hashes, Digests, OfflineEngine, HashThreads;
 
 type
   TMakeFile = record
@@ -38,13 +38,28 @@ type
   TChecksumJob = class
   private
     FCancelled: Boolean;
+    // while Run reads the files (several at once - HashThreads): each worker's hasher and buffer, and per file its
+    // checksum, whether it was read (0 not yet, 1 read, 2 could not be read) and why not (a Windows error code)
+    FRoot: string;
+    FHashers: array of THasher;
+    FBufs: array of Pointer;
+    FDigests: array of TDigest;
+    FState: array of Byte;
+    FError: array of DWORD;
+    FFailedAt: LongInt;          // the first file that could not be read (MaxInt: none yet); later ones are not read
+    FThreads: Integer;
+    // per worker: the file it is reading (-1: none) and how much of it - fixed size, so the page can read them
+    // while the job runs (ReadingNow)
+    FSlotItem: array[0..MaxHashThreads - 1] of LongInt;
+    FSlotDone: array[0..MaxHashThreads - 1] of Int64;
+    procedure HashOne(Worker, Index: Integer);
     procedure WriteProgram(const ExePath, ListName: string);
   public
     Options: TMakeOptions;
     Files: TMakeFiles;
     StubFile: string;            // tests only: the program is copied from this file instead of the CHECKSTUB resource
     // progress
-    FileIndex: Integer;          // the file being read now
+    FileIndex: Integer;          // a file being read now (the last one a worker started)
     BytesDone, BytesTotal: Int64;
     // the result
     Outcome: TMakeResult;
@@ -55,6 +70,9 @@ type
     procedure Run;
     procedure Cancel;            // safe from another thread
     property Cancelled: Boolean read FCancelled;
+    property Threads: Integer read FThreads;   // after Run: how many files were read at once
+    // the files being read right now, the biggest first (at most MaxReading); safe from another thread
+    function ReadingNow: TReadingFiles;
   end;
 
   TChecksumThread = class(TThread)
@@ -190,7 +208,7 @@ var
     H: THandle;
     Name: string;
   begin
-    H := FindFirstFileW(PWideChar(Root + Rel + '*'), FD);
+    H := FindFirstFileW(PWideChar(ExtendedPath(Root + Rel + '*')), FD);
     if H = INVALID_HANDLE_VALUE then Exit;
     try
       repeat
@@ -198,8 +216,12 @@ var
         if (Name = '.') or (Name = '..') then Continue;
         if (FD.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
         begin
-          // not into junctions and links: they can loop, and their files are someone else's
-          if Recurse and ((FD.dwFileAttributes and FILE_ATTRIBUTE_REPARSE_POINT) = 0) then Walk(Rel + Name + '\');
+          // not into junctions and links (they can loop, and their files are someone else's), nor into Windows'
+          // own hidden system folders - a drive's $RECYCLE.BIN and System Volume Information
+          if Recurse and ((FD.dwFileAttributes and FILE_ATTRIBUTE_REPARSE_POINT) = 0) and
+             ((FD.dwFileAttributes and (FILE_ATTRIBUTE_HIDDEN or FILE_ATTRIBUTE_SYSTEM)) <>
+              (FILE_ATTRIBUTE_HIDDEN or FILE_ATTRIBUTE_SYSTEM)) then
+            Walk(Rel + Name + '\');
         end
         else if (BaseName = '') or not IsMakerOutput(Rel + Name, BaseName) then
         begin
@@ -384,12 +406,35 @@ end;
 { ---------------------------------------------------------------- the job }
 
 constructor TChecksumJob.Create(const O: TMakeOptions; const AFiles: TMakeFiles);
+var
+  I: Integer;
 begin
   inherited Create;
   Options := O;
   Files := Copy(AFiles);
   FileIndex := 0;
   Outcome := mkFailed;
+  for I := 0 to MaxHashThreads - 1 do FSlotItem[I] := -1;
+end;
+
+function TChecksumJob.ReadingNow: TReadingFiles;
+var
+  W, Item, N: Integer;
+begin
+  Result := nil;
+  N := 0;
+  for W := 0 to MaxHashThreads - 1 do
+  begin
+    Item := FSlotItem[W];
+    if (Item < 0) or (Item > High(Files)) then Continue;
+    SetLength(Result, N + 1);
+    Result[N].Name := Files[Item].RelName;
+    Result[N].Size := Files[Item].Size;
+    Result[N].Done := FSlotDone[W];
+    if Result[N].Done > Result[N].Size then Result[N].Done := Result[N].Size;
+    Inc(N);
+  end;
+  SortReading(Result);
 end;
 
 procedure TChecksumJob.Cancel;
@@ -427,17 +472,75 @@ begin
     raise Exception.Create('This build has no icon for the checksum program.');
 end;
 
-procedure TChecksumJob.Run;
 const
   ChunkSize = 1024 * 1024;
+
+{ One file, on worker Worker (TParallelWork): its checksum into FDigests, or why it could not be read into FError.
+  The first file that can't be read stops the files after it from being read - the run fails on it, as it always
+  did; the files before it are still read, so it is the same file a one-thread run fails on. }
+procedure TChecksumJob.HashOne(Worker, Index: Integer);
 var
-  Root, ListName, Text, Exe: string;
-  Hasher: THasher;
-  Buf: Pointer;
-  I: Integer;
   H: THandle;
   Got: DWORD;
-  D: TDigest;
+  Hasher: THasher;
+  Buf: Pointer;
+
+  procedure Failed(Code: DWORD);
+  begin
+    FError[Index] := Code;
+    FState[Index] := 2;
+    LowerTo(FFailedAt, Index);
+  end;
+
+begin
+  if FCancelled or (Index > FFailedAt) then Exit;
+  FileIndex := Index;
+  Hasher := FHashers[Worker];
+  Buf := FBufs[Worker];
+  FSlotDone[Worker] := 0;
+  InterlockedExchange(FSlotItem[Worker], Index);
+  try
+    try
+      H := CreateFileW(PWideChar(ExtendedPath(FRoot + Files[Index].RelName)), GENERIC_READ,
+        FILE_SHARE_READ or FILE_SHARE_WRITE, nil, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
+      if H = INVALID_HANDLE_VALUE then
+      begin
+        Failed(GetLastError);
+        Exit;
+      end;
+      try
+        Hasher.Reset;
+        repeat
+          if FCancelled or (Index > FFailedAt) then Exit;
+          if not Windows.ReadFile(H, Buf^, ChunkSize, Got, nil) then
+          begin
+            Failed(GetLastError);
+            Exit;
+          end;
+          if Got > 0 then
+          begin
+            Hasher.Update(Buf, Got);
+            AddBytes(BytesDone, Got);
+            Inc(FSlotDone[Worker], Got);
+          end;
+        until Got = 0;
+      finally
+        CloseHandle(H);
+      end;
+      Hasher.Final(FDigests[Index]);
+      FState[Index] := 1;
+    except
+      Failed(0);
+    end;
+  finally
+    InterlockedExchange(FSlotItem[Worker], -1);   // also after an Exit above
+  end;
+end;
+
+procedure TChecksumJob.Run;
+var
+  ListName, Text, Exe, Why: string;
+  I: Integer;
   Parts: TPathList;
   Raw: RawByteString;
   FS: TFileStream;
@@ -450,51 +553,51 @@ begin
   BytesDone := 0;
   BytesTotal := 0;
   for I := 0 to High(Files) do Inc(BytesTotal, Files[I].Size);
-  Root := IncludeTrailingPathDelimiter(Options.Folder);
-  Hasher := nil;
-  Buf := nil;
+  FRoot := IncludeTrailingPathDelimiter(Options.Folder);
+  FThreads := 0;
   try
     try
-      if not DirectoryExists(Root) then raise Exception.Create('The folder is not there: ' + Root);
+      if not DirectoryExists(FRoot) then raise Exception.Create('The folder is not there: ' + FRoot);
       if Length(Files) = 0 then raise Exception.Create('There are no files to list.');
       if not FormatSupports(Options.Format, Options.Algo) then
         raise Exception.Create(FormatNames[Options.Format] + ' lists cannot hold ' + HashNames[Options.Algo] +
           ' checksums.');
       ListName := ListFileName(Options);
-      Hasher := NewHasher(Options.Algo);
-      Buf := VirtualAlloc(nil, ChunkSize, MEM_COMMIT, PAGE_READWRITE);
+      SetLength(FDigests, Length(Files));
+      SetLength(FState, Length(Files));
+      SetLength(FError, Length(Files));
+      for I := 0 to High(Files) do FState[I] := 0;
+      FFailedAt := MaxInt;
+      FThreads := HashThreadCount(FRoot);
+      if FThreads > Length(Files) then FThreads := Length(Files);
+      SetLength(FHashers, FThreads);
+      SetLength(FBufs, FThreads);
+      for I := 0 to FThreads - 1 do
+      begin
+        FHashers[I] := NewHasher(Options.Algo);
+        FBufs[I] := VirtualAlloc(nil, ChunkSize, MEM_COMMIT, PAGE_READWRITE);
+        if FBufs[I] = nil then OutOfMemoryError;
+      end;
+      TParallelWork.Create(Length(Files), FThreads, HashOne).Free;   // Free waits for every worker
+      if FCancelled then Exit;
       SetLength(Parts, Length(Files) + 1);
       Parts[0] := DigestHeader(Options.Format, Options.Algo, 'Offline Backup ' + AppVersion + ' on ' +
         FormatDateTime('yyyy"-"mm"-"dd" "hh":"nn', Started));
       for I := 0 to High(Files) do
       begin
-        FileIndex := I;
-        if FCancelled then Exit;
-        H := CreateFileW(PWideChar(Root + Files[I].RelName), GENERIC_READ, FILE_SHARE_READ or FILE_SHARE_WRITE, nil,
-          OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
-        if H = INVALID_HANDLE_VALUE then
-          raise Exception.Create('Could not read ' + Files[I].RelName + ': ' + SysErrorMessage(GetLastError));
-        try
-          Hasher.Reset;
-          repeat
-            if FCancelled then Exit;
-            if not ReadFile(H, Buf^, ChunkSize, Got, nil) then
-              raise Exception.Create('Could not read ' + Files[I].RelName + ': ' + SysErrorMessage(GetLastError));
-            if Got > 0 then
-            begin
-              Hasher.Update(Buf, Got);
-              Inc(BytesDone, Got);
-            end;
-          until Got = 0;
-        finally
-          CloseHandle(H);
+        // files are started in list order, so every file before the first unreadable one has been read
+        if FState[I] <> 1 then
+        begin
+          Why := '';
+          if (FState[I] = 2) and (FError[I] <> 0) then Why := ': ' + SysErrorMessage(FError[I]);
+          raise Exception.Create('Could not read ' + Files[I].RelName + Why);
         end;
-        Hasher.Final(D);
-        Parts[I + 1] := DigestLine(Options.Format, Options.Algo, Files[I].RelName, D) + DigestEOL(Options.Format);
+        Parts[I + 1] := DigestLine(Options.Format, Options.Algo, Files[I].RelName, FDigests[I]) +
+          DigestEOL(Options.Format);
       end;
       Text := JoinParts(Parts);
       Raw := EncodeUtf8(Text);
-      ListPath := Root + ListName;
+      ListPath := FRoot + ListName;
       try
         FS := TFileStream.Create(ListPath, fmCreate);
         try
@@ -511,7 +614,7 @@ begin
       end;
       if Options.MakeProgram then
       begin
-        Exe := Root + ProgramFileName(Options);
+        Exe := FRoot + ProgramFileName(Options);
         try
           WriteProgram(Exe, ListName);
           ExePath := Exe;
@@ -533,8 +636,14 @@ begin
     end;
   finally
     if FCancelled and (Outcome <> mkDone) then Outcome := mkCancelled;
-    if Buf <> nil then VirtualFree(Buf, 0, MEM_RELEASE);
-    Hasher.Free;
+    for I := 0 to High(FBufs) do
+      if FBufs[I] <> nil then VirtualFree(FBufs[I], 0, MEM_RELEASE);
+    for I := 0 to High(FHashers) do FHashers[I].Free;
+    FBufs := nil;
+    FHashers := nil;
+    FDigests := nil;
+    FState := nil;
+    FError := nil;
     Finished := Now;
   end;
 end;

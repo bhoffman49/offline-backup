@@ -6,11 +6,11 @@ them. Each drive knows which folders it backs up. Before anything changes on a d
 that would be overwritten or deleted are kept in the day's archive (`ARCHIVE\MMDDYY`) first; moved files are moved on the drive instead
 of copied again; and CRC32 / MD5 checksums let you verify a drive at any time, even on another PC.
 
-Version **0.11.0** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
+Version **0.12.0** - public beta. MIT licensed (see `LICENSE`). See `CHANGELOG.md`.
 
 ## Download and install
 
-1. Download `OfflineBackup-0.11.0-win64.zip` from the Releases page and unzip it to a folder you can write to
+1. Download `OfflineBackup-0.12.0-win64.zip` from the Releases page and unzip it to a folder you can write to
    (for example `Documents\OfflineBackup`).
 2. Start `OfflineBackup.exe` - its window opens, and it stays in the tray when you close the window.
    Windows may warn that the program is unknown (it is not code-signed): **More info** > **Run anyway**.
@@ -89,6 +89,9 @@ common\
                        area and the MD5 check of other lists (from the Checksum Applet Creator)
   Digests.pas          checksum list formats: writing them, and reading .md5/.sha1/.sha256/.sfv/BSD-style lists
   Checksums.pas        the Checksum Applet area's work: folder scan, the list, the checksum program, the check report
+  HashThreads.pas      reading several files at once: how many (CPU, spinning disk or not) and the workers that
+                       share the files out (Windows API only, so the checksum program uses it too)
+  ReadingPanel.pas     the files being read right now, under the drive list (drawn the same in VCL and LCL)
   OfflineBackup.ico    app + tray icon (made by tools\make-icon.py)
   icons\               the sidebar's icons (made by tools\make-sidebar-icons.py) and checksum-program.ico
 stub\                  CheckStub.dpr - the small checksum program the Checksum Applet area writes (plain Win32, no
@@ -259,6 +262,13 @@ by the file's extension (or an fsum-style `; Algorithm:` line). **Open MD5 file.
 match, are bad, missing or unreadable (**Summary** tab) and which ones (**Files** tab). **Check again** checks the
 same file again. **Copy report** and **Save report...** give the result as text, like ExactFile's report: a summary,
 the problem files, then every file.
+
+The MD5 check, Verify drive, recording checksums after a copy, the Checksum Applet and its `checksum.exe` read
+**several files at once** - as many as the PC has logical processors, less two, at a lower priority so the PC stays
+usable - and one at a time on a drive that says it is a spinning disk (where reading several files at once would only
+make it seek). Results, logs and reports are in list order either way. While they run, the files being read right
+now are listed under the drive list, each with its own bar; the MD5 check's Summary tab then says how long it took
+and how fast the files were read.
 
 **Record checksums after each copy** (Settings > Safety and archive, on by default): after a folder is copied, its copied files are read again from the source for their checksums.
 On a first copy that is the whole backup, so it takes a while. Switched off, copies end sooner, but the files just

@@ -7,7 +7,8 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, UITypes, Graphics, Controls, Forms, Dialogs, StdCtrls, ExtCtrls, ComCtrls, Menus,
-  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, ChecksumsPage, AboutBox;
+  OfflineEngine, DriveWatcher, SideBar, SettingsPage, DrivesPage, PreviewForm, CheckPage, ChecksumsPage, AboutBox,
+  ReadingPanel;
 
 const
   // the areas of the sidebar, in its order
@@ -80,6 +81,7 @@ type
     FThread: TOfflineCopyThread;
     FQuitting: Boolean;
     FSide: TSideBar;
+    FReading: TReadingPanel;          // the files being read now, under the drive list
     FDrivesPage: TFrameDrives;
     FCheckPage: TFrameCheck;
     FChecksumsPage: TFrameChecksums;
@@ -151,6 +153,11 @@ begin
   TrayIcon.Hint := 'Offline Backup';
   TrayIcon.Visible := True;
   Caption := 'Offline Backup ' + AppVersion;
+  // the files an MD5 check, Verify or recording checksums is reading, between the drive list and the progress pane
+  FReading := TReadingPanel.Create(Self);
+  FReading.Parent := TabDrivesIn;
+  FReading.Above := SplitterProgress;
+  FReading.Align := alBottom;
   FSide := TSideBar.Create(Self);
   FSide.Parent := Self;
   FSide.Align := alLeft;
@@ -751,6 +758,7 @@ end;
 procedure TFormMain.CopyProgress(const P: TCopyProgress);
 begin
   FLastProgress := P;
+  FReading.ShowProgress(P);
   SetStatus(P.Status);
   if P.Folder = '' then
     ClearProgress
@@ -771,11 +779,12 @@ begin
     LabelTotalPct.Caption := IntToStr(ProgressBar.Position) + '% of ' + FormatSize(P.HashBytes);
   end
   else LabelTotalBar.Caption := 'Total:';
-  // the file bar: copies only - a verify or MD5 check reads files without reporting each one
-  LabelFileBar.Visible := not P.Verifying and not P.Checking;
+  // the file bar: the copy only - a Verify, an MD5 check and recording checksums read several files at once, and
+  // show them in the rows above (FReading)
+  LabelFileBar.Visible := not P.Verifying and not P.Checking and not P.Hashing;
   ProgressFile.Visible := LabelFileBar.Visible;
   LabelFilePct.Visible := LabelFileBar.Visible;
-  if P.CurrentFile = '' then
+  if (P.CurrentFile = '') or P.Hashing then
   begin
     LabelFile.Caption := '';
     LabelFilePct.Caption := '';
@@ -783,8 +792,7 @@ begin
   end
   else
   begin
-    if P.Hashing then LabelFile.Caption := 'Reading: ' + ExtractFileName(P.CurrentFile)
-    else LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
+    LabelFile.Caption := 'Copying: ' + ExtractFileName(P.CurrentFile);
     if P.CurrentFileSize > 0 then ProgressFile.Position := Trunc(100.0 * P.CurrentFileDone / P.CurrentFileSize)
     else ProgressFile.Position := 100;
     LabelFilePct.Caption := IntToStr(ProgressFile.Position) + '% of ' + FormatSize(P.CurrentFileSize);
@@ -913,6 +921,7 @@ var
 begin
   T := Sender as TOfflineCopyThread;
   FThread := nil;                     // frees itself after this
+  FReading.Visible := False;
   AddLog(T.DriveLabel + ': ' + CopyResultText(T.CopyResult));
   TrayIcon.Hint := 'Offline Backup';
   if T.Checking then
@@ -944,7 +953,8 @@ begin
     TrayIcon.Hint := 'Offline Backup';
     UpdateButtons;
     ShowWindow;
-    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult, T.Engine.CheckAlgo);
+    FCheckPage.ShowResult(T.CheckFile, T.Engine.CheckItems, T.CopyResult, T.Engine.CheckAlgo,
+      T.Engine.CheckSeconds);
     FSide.ItemIndex := AREA_CHECK;
     Exit;
   end;
